@@ -1,17 +1,29 @@
 // apps/server/src/main.rs
+use axum::{http::HeaderValue, routing::get, Json, Router};
+use note_core::ping;
+use serde_json::{json, Value};
+use tower_http::cors::{Any, CorsLayer};
 
-use axum::{extract::Path, routing::get, Json, Router};
-use note_core::{get_note, Note};
-
-async fn get_note_handler(Path(id): Path<String>) -> Json<Note> {
-    Json(get_note(&id).await.unwrap())
+async fn ping_handler() -> Json<Value> {
+    match ping().await {
+        Ok(msg) => Json(json!({"message": msg})),
+        Err(e) => Json(json!({"error": e.to_string()})),
+    }
 }
 
 #[tokio::main]
 async fn main() {
-    let app = Router::new()
-        .route("/api/notes/{id}", get(get_note_handler));
+    let cors = CorsLayer::new()
+        .allow_origin("http://localhost:1420".parse::<HeaderValue>().unwrap())
+        .allow_methods(Any)
+        .allow_headers(Any);
 
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
+    let app = Router::new()
+        .route("/api/ping", get(ping_handler))
+        .layer(cors);
+
+    let addr = "127.0.0.1:3000";
+    let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
+    tracing::info!("listing on http://{}", addr);
     axum::serve(listener, app).await.unwrap();
 }
