@@ -1,15 +1,12 @@
-use serde::{Deserialize, Serialize};
+pub mod db;
+pub mod error;
+pub mod models;
+pub mod repo;
 
-#[derive(Debug, thiserror::Error)]
-pub enum CoreError {
-    #[error("not found: {0}")]
-    NotFound(String),
-    #[error("not found: {0}")]
-    Databse(String),
-    #[error("not found: {0}")]
-    Internal(String),
-}
+pub use db::{init_memory_pool, init_pool};
+pub use error::CoreError;
+pub use models::*;
 
 pub async fn ping() -> Result<String, CoreError> {
-    Ok("Pong".to_string())
+    Ok("pong".to_string())
 }
