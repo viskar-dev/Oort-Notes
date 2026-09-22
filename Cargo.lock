@@ -2359,7 +2359,9 @@ dependencies = [
  "serde_json",
  "sqlx",
  "thiserror 2.0.20",
+ "tokio",
  "tracing",
+ "uuid",
 ]
 
 [[package]]
@@ -2369,6 +2371,7 @@ dependencies = [
  "note-core",
  "serde",
  "serde_json",
+ "sqlx",
  "tauri",
  "tauri-build",
  "tauri-plugin-sql",
@@ -2383,6 +2386,7 @@ dependencies = [
  "note-core",
  "serde",
  "serde_json",
+ "sqlx",
  "tokio",
  "tower-http",
  "tracing",
