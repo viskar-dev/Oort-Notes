@@ -12,6 +12,10 @@ pub enum CoreError {
     #[error("serialization error: {0}")]
     Serialization(#[from] serde_json::Error),
 
+    #
+
+    #
+
     #[error("internal error: {0}")]
     Internal(String),
 }

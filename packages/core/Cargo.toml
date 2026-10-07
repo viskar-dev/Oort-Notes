@@ -16,5 +16,8 @@ reqwest.workspace = true
 tokio.workspace = true
 uuid.workspace = true
 
+default = []
+# (Windows Credential Manager / macOS Keychain / Secret Service on Linux).
+
 [lints]
 workspace = true
