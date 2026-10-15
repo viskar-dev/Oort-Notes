@@ -1,111 +1,282 @@
-:root {
-  --text: #6b6375;
-  --text-h: #08060d;
-  --bg: #fff;
-  --border: #e5e4e7;
-  --code-bg: #f4f3ec;
-  --accent: #aa3bff;
-  --accent-bg: rgba(170, 59, 255, 0.1);
-  --accent-border: rgba(170, 59, 255, 0.5);
-  --social-bg: rgba(244, 243, 236, 0.5);
-  --shadow:
-    rgba(0, 0, 0, 0.1) 0 10px 15px -3px, rgba(0, 0, 0, 0.05) 0 4px 6px -2px;
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+@import "@fontsource-variable/geist";
 
-  --sans: system-ui, 'Segoe UI', Roboto, sans-serif;
-  --heading: system-ui, 'Segoe UI', Roboto, sans-serif;
-  --mono: ui-monospace, Consolas, monospace;
+@custom-variant dark (&:is(.dark *));
 
-  font: 18px/145% var(--sans);
-  letter-spacing: 0.18px;
-  color-scheme: light dark;
-  color: var(--text);
-  background: var(--bg);
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-
-  @media (max-width: 1024px) {
-    font-size: 16px;
-  }
+@theme {
+  /* Oort dark palette
+     (accent/muted/border come from shadcn's theme below — primary carries
+     the purple accent; set class="dark" on <html>) */
+  --color-ink: #f4f4f6;        /* primary text */
+  --color-faint: #8b8a96;      /* labels, divider text */
+  --color-surface: #111016;    /* sidebar, topbar (panel) */
+  --color-raised: #17161c;     /* cards, active rows (hover/input) */
+  --color-canvas: #060608;     /* editor background (bg) */
+  --color-line: #24232c;       /* borders */
+  --color-accent-strong: #7c6ee6;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --text: #9ca3af;
-    --text-h: #f3f4f6;
-    --bg: #16171d;
-    --border: #2e303a;
-    --code-bg: #1f2028;
-    --accent: #c084fc;
-    --accent-bg: rgba(192, 132, 252, 0.15);
-    --accent-border: rgba(192, 132, 252, 0.5);
-    --social-bg: rgba(47, 48, 58, 0.5);
-    --shadow:
-      rgba(0, 0, 0, 0.4) 0 10px 15px -3px, rgba(0, 0, 0, 0.25) 0 4px 6px -2px;
-  }
-
-  #social .button-icon {
-    filter: invert(1) brightness(2);
-  }
-}
-
+html,
+body,
 #root {
-  width: 1126px;
-  max-width: 100%;
-  margin: 0 auto;
-  text-align: center;
-  border-inline: 1px solid var(--border);
-  min-height: 100svh;
-  display: flex;
-  flex-direction: column;
-  box-sizing: border-box;
+  height: 100%;
 }
 
 body {
   margin: 0;
+  background: var(--color-canvas);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
 }
 
-h1,
-h2 {
-  font-family: var(--heading);
-  font-weight: 500;
-  color: var(--text-h);
+/* tldraw editor: Oort theme on top of its dark theme. The floating UI
+   (toolbar, style panel, menus) reads --color-panel* / --color-low etc. */
+/* tldraw editor: purple selection/focus accent on top of its dark theme */
+
+/* floating toolbar as a full-radius pill: every wrapper layer rounds fully,
+   and the overflowing tool strip inherits the capsule so its ends match the
+   pill at any width */
+.oort-editor .tlui-toolbar,
+.oort-editor .tlui-toolbar__inner,
+.oort-editor .tlui-toolbar__tools,
+.oort-editor .tlui-toolbar__extras,
+.oort-editor .tlui-toolbar__extras__controls,
+.oort-editor .tlui-toolbar__tools .tlui-buttons__horizontal {
+  border-radius: 9999px;
 }
 
-h1 {
-  font-size: 56px;
-  letter-spacing: -1.68px;
-  margin: 32px 0;
-  @media (max-width: 1024px) {
-    font-size: 36px;
-    margin: 20px 0;
+/* active tool button: circular highlight behind the icon (the ::after
+   layer carries the active background; inset 4px on a 48px square = circle) */
+.oort-editor .tlui-toolbar .tlui-button__tool::after {
+  border-radius: 9999px;
+}
+
+/* canvas zoom inside the same pill: hairline divider, then the zoom readout
+   ("100%") which opens tldraw's zoom menu. The tool strip hides the tail of
+   its list on narrow windows and re-renders the children in the "more"
+   popover grid, so the zoom block is pinned visible in the strip and hidden
+   from that popover. */
+.oort-editor .tlui-toolbar__tools__list > .oort-toolbar__zoom {
+  display: flex !important;
+  align-items: center;
+}
+
+.oort-editor .tlui-buttons__grid .oort-toolbar__zoom {
+  display: none !important;
+}
+
+.oort-editor .oort-toolbar__zoom-divider {
+  width: 1px;
+  height: 22px;
+  margin: 0 4px 0 6px;
+  border-radius: 1px;
+  background: var(--color-divider);
+}
+
+.oort-editor .oort-toolbar__zoom .tlui-zoom-menu__button {
+  width: auto;
+  min-width: 52px;
+  color: var(--color-text-1);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.oort-editor .tl-theme__dark {
+  /* canvas */
+  --color-background: #060608;
+  --color-selection-fill: #7c6ee618;
+  --color-selection-stroke: #7c6ee6;
+
+  /* ui panels */
+  --color-low: #0b0a10;
+  --color-low-border: #24232c;
+  --color-culled: #17161c;
+  --color-divider: #24232c;
+  --color-panel: #111016;
+  --color-panel-contrast: #17161c;
+  --color-panel-overlay: rgba(17, 16, 22, 0.82);
+  --color-panel-transparent: rgba(17, 16, 22, 0);
+  --color-hint: rgba(255, 255, 255, 0.07);
+
+  /* accent */
+  --color-selected: #7c6ee6;
+  --color-selected-contrast: #ffffff;
+  --color-focus: #8b7ff0;
+
+  /* text */
+  --color-text: #f4f4f6;
+  --color-text-1: #a09fab;
+
+  /* named */
+  --color-primary: #7c6ee6;
+}
+
+@theme inline {
+  --font-heading: var(--font-sans);
+  --font-sans: 'Geist Variable', sans-serif;
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --color-foreground: var(--foreground);
+  --color-background: var(--background);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+}
+
+:root {
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.145 0 0);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.145 0 0);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.145 0 0);
+  --primary: oklch(0.205 0 0);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.97 0 0);
+  --secondary-foreground: oklch(0.205 0 0);
+  --muted: oklch(0.97 0 0);
+  --muted-foreground: oklch(0.556 0 0);
+  --accent: oklch(0.97 0 0);
+  --accent-foreground: oklch(0.205 0 0);
+  --destructive: oklch(0.577 0.245 27.325);
+  --border: oklch(0.922 0 0);
+  --input: oklch(0.922 0 0);
+  --ring: oklch(0.708 0 0);
+  --chart-1: oklch(0.87 0 0);
+  --chart-2: oklch(0.556 0 0);
+  --chart-3: oklch(0.439 0 0);
+  --chart-4: oklch(0.371 0 0);
+  --chart-5: oklch(0.269 0 0);
+  --radius: 0.625rem;
+  --sidebar: oklch(0.985 0 0);
+  --sidebar-foreground: oklch(0.145 0 0);
+  --sidebar-primary: oklch(0.205 0 0);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.97 0 0);
+  --sidebar-accent-foreground: oklch(0.205 0 0);
+  --sidebar-border: oklch(0.922 0 0);
+  --sidebar-ring: oklch(0.708 0 0);
+}
+
+.dark {
+  --background: #060608;
+  --foreground: #f4f4f6;
+  --card: #111016;
+  --card-foreground: #f4f4f6;
+  --popover: #14141a;
+  --popover-foreground: #f4f4f6;
+  --primary: #7c6ee6;
+  --primary-foreground: #ffffff;
+  --secondary: #17161c;
+  --secondary-foreground: #f4f4f6;
+  --muted: #17161c;
+  --muted-foreground: #a09fab;
+  --accent: #17161c;
+  --accent-foreground: #f4f4f6;
+  --destructive: #f87171;
+  --border: #24232c;
+  --input: #17161c;
+  --ring: #7c6ee6;
+  --chart-1: oklch(0.87 0 0);
+  --chart-2: oklch(0.556 0 0);
+  --chart-3: oklch(0.439 0 0);
+  --chart-4: oklch(0.371 0 0);
+  --chart-5: oklch(0.269 0 0);
+  --sidebar: #111016;
+  --sidebar-foreground: #f4f4f6;
+  --sidebar-primary: #7c6ee6;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #17161c;
+  --sidebar-accent-foreground: #f4f4f6;
+  --sidebar-border: #24232c;
+  --sidebar-ring: #8b7cf6;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+  html {
+    @apply font-sans;
   }
 }
-h2 {
-  font-size: 24px;
-  line-height: 118%;
-  letter-spacing: -0.24px;
-  margin: 0 0 8px;
-  @media (max-width: 1024px) {
-    font-size: 20px;
-  }
+
+
+.tl-watermark_SEE-LICENSE {
+  display: none !important;
 }
-p {
+
+/* ================= Notebook home (settings tokens per design spec) ===== */
+.nb-cover {
+  background-image: linear-gradient(
+    135deg,
+    rgba(255, 255, 255, 0.14) 0%,
+    rgba(255, 255, 255, 0.03) 45%,
+    rgba(0, 0, 0, 0.3) 100%
+  );
+}
+.nb-cover:hover {
+  transform: translateY(-2px);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 4px 8px rgba(0, 0, 0, 0.3),
+    0 16px 32px rgba(0, 0, 0, 0.45);
+}
+
+/* ---- math (KaTeX) ------------------------------------------------- */
+/* inline formulas inside tldraw rich text never wrap mid-formula */
+.tl-math {
+  white-space: nowrap;
+}
+/* display formulas own their line inside a text shape */
+.tl-math-display {
+  display: block;
+  text-align: center;
+}
+/* the shapes already provide the spacing; KaTeX's own display margins would
+   double it and skew the equation card's auto-fit measurement */
+.tl-math-display .katex-display,
+.math-block-shape .katex-display {
   margin: 0;
 }
-
-code,
-.counter {
-  font-family: var(--mono);
-  display: inline-flex;
-  border-radius: 4px;
-  color: var(--text-h);
-}
-
-code {
-  font-size: 15px;
-  line-height: 135%;
-  padding: 4px 8px;
-  background: var(--code-bg);
+/* KaTeX's error red is too dark for the card */
+.math-block-shape .katex-error {
+  color: #f87171;
 }
