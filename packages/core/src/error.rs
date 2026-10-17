@@ -12,9 +12,11 @@ pub enum CoreError {
     #[error("serialization error: {0}")]
     Serialization(#[from] serde_json::Error),
 
-    #
+    #[error("network error: {0}")]
+    Http(#[from] reqwest::Error),
 
-    #
+    #[error("google api error: {0}")]
+    Google(String),
 
     #[error("internal error: {0}")]
     Internal(String),

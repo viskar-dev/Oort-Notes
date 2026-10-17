@@ -1,5 +1,7 @@
+pub mod backup;
 pub mod db;
 pub mod error;
+pub mod google;
 pub mod models;
 pub mod repo;
 

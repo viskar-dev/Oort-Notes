@@ -2,7 +2,7 @@ use sqlx::SqlitePool;
 
 use crate::error::CoreError;
 use crate::models::{
-    Chapter, ChapterCanvas, Id, Notebook, PagePreset, Topic,
+    Backup, BackupSettings, Chapter, ChapterCanvas, GoogleAccount, Id, Notebook, PagePreset, Topic,
     TopicPage, UiPreset,
 };
 
@@ -908,4 +908,241 @@ pub async fn delete_ui_preset(pool: &SqlitePool, id: &str) -> Result<(), CoreErr
         return Err(CoreError::NotFound(format!("ui preset {id}")));
     }
     Ok(())
+}
+
+// ---------------------------------------------------------------------
+// Settings (key/value)
+// ---------------------------------------------------------------------
+
+pub async fn get_setting(pool: &SqlitePool, key: &str) -> Result<Option<String>, CoreError> {
+    let value: Option<String> = sqlx::query_scalar("SELECT value FROM settings WHERE key = ?")
+        .bind(key)
+        .fetch_optional(pool)
+        .await?;
+    Ok(value)
+}
+
+pub async fn set_setting(pool: &SqlitePool, key: &str, value: &str) -> Result<(), CoreError> {
+    sqlx::query(
+        "INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?)
+         ON CONFLICT (key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+    )
+    .bind(key)
+    .bind(value)
+    .bind(now_ms())
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+// ---------------------------------------------------------------------
+// Google account (single row)
+// ---------------------------------------------------------------------
+
+type GoogleAccountRow = (Option<String>, Option<String>, String, i64);
+
+fn google_account_from(r: GoogleAccountRow) -> GoogleAccount {
+    GoogleAccount {
+        email: r.0,
+        refresh_token: r.1,
+        scopes: r.2,
+        connected_at: r.3,
+    }
+}
+
+pub async fn load_google_account(pool: &SqlitePool) -> Result<Option<GoogleAccount>, CoreError> {
+    let row = sqlx::query_as::<_, GoogleAccountRow>(
+        "SELECT email, refresh_token, scopes, connected_at FROM google_account WHERE id = 1",
+    )
+    .fetch_optional(pool)
+    .await?;
+    Ok(row.map(google_account_from))
+}
+
+/// Upserts the single account row. Pass `refresh_token = None` to keep the
+/// stored one (desktop mode stores it in the keychain instead).
+pub async fn save_google_account(
+    pool: &SqlitePool,
+    email: Option<&str>,
+    refresh_token: Option<&str>,
+    scopes: &str,
+) -> Result<GoogleAccount, CoreError> {
+    sqlx::query(
+        "INSERT INTO google_account (id, email, refresh_token, scopes, connected_at)
+         VALUES (1, ?, ?, ?, ?)
+         ON CONFLICT (id) DO UPDATE SET
+           email = excluded.email,
+           refresh_token = COALESCE(excluded.refresh_token, google_account.refresh_token),
+           scopes = excluded.scopes,
+           connected_at = excluded.connected_at",
+    )
+    .bind(email)
+    .bind(refresh_token)
+    .bind(scopes)
+    .bind(now_ms())
+    .execute(pool)
+    .await?;
+    load_google_account(pool)
+        .await?
+        .ok_or_else(|| CoreError::Internal("google account upsert failed".to_string()))
+}
+
+pub async fn clear_google_account(pool: &SqlitePool) -> Result<(), CoreError> {
+    sqlx::query("DELETE FROM google_account WHERE id = 1")
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+// ---------------------------------------------------------------------
+// Backups (Google Drive history)
+// ---------------------------------------------------------------------
+
+type BackupRow = (
+    String,
+    String,
+    Option<String>,
+    Option<i64>,
+    String,
+    Option<String>,
+    i64,
+    Option<i64>,
+);
+
+fn backup_from(r: BackupRow) -> Backup {
+    Backup {
+        id: r.0,
+        file_name: r.1,
+        drive_file_id: r.2,
+        size_bytes: r.3,
+        status: r.4,
+        error: r.5,
+        created_at: r.6,
+        uploaded_at: r.7,
+    }
+}
+
+const BACKUP_COLUMNS: &str =
+    "id, file_name, drive_file_id, size_bytes, status, error, created_at, uploaded_at";
+
+pub async fn create_backup(
+    pool: &SqlitePool,
+    id: &str,
+    file_name: &str,
+) -> Result<Backup, CoreError> {
+    sqlx::query("INSERT INTO backups (id, file_name, status) VALUES (?, ?, 'pending')")
+        .bind(id)
+        .bind(file_name)
+        .execute(pool)
+        .await?;
+    load_backup(pool, id).await
+}
+
+pub async fn load_backup(pool: &SqlitePool, id: &str) -> Result<Backup, CoreError> {
+    let r = sqlx::query_as::<_, BackupRow>(&format!(
+        "SELECT {BACKUP_COLUMNS} FROM backups WHERE id = ?"
+    ))
+    .bind(id)
+    .fetch_optional(pool)
+    .await?
+    .ok_or_else(|| CoreError::NotFound(format!("backup {id}")))?;
+    Ok(backup_from(r))
+}
+
+pub async fn list_backups(pool: &SqlitePool, limit: i64) -> Result<Vec<Backup>, CoreError> {
+    let rows = sqlx::query_as::<_, BackupRow>(&format!(
+        // rowid breaks same-millisecond ties so "oldest" is insertion order
+        "SELECT {BACKUP_COLUMNS} FROM backups ORDER BY created_at DESC, rowid DESC LIMIT ?"
+    ))
+    .bind(limit)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows.into_iter().map(backup_from).collect())
+}
+
+pub async fn mark_backup_uploaded(
+    pool: &SqlitePool,
+    id: &str,
+    drive_file_id: &str,
+    size_bytes: i64,
+) -> Result<(), CoreError> {
+    sqlx::query(
+        "UPDATE backups
+         SET status = 'uploaded', drive_file_id = ?, size_bytes = ?, uploaded_at = ?, error = NULL
+         WHERE id = ?",
+    )
+    .bind(drive_file_id)
+    .bind(size_bytes)
+    .bind(now_ms())
+    .bind(id)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+pub async fn mark_backup_failed(pool: &SqlitePool, id: &str, error: &str) -> Result<(), CoreError> {
+    sqlx::query("UPDATE backups SET status = 'failed', error = ? WHERE id = ?")
+        .bind(error)
+        .bind(id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+pub async fn mark_backup_deleted(pool: &SqlitePool, id: &str) -> Result<(), CoreError> {
+    sqlx::query("UPDATE backups SET status = 'deleted' WHERE id = ?")
+        .bind(id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+// ---------------------------------------------------------------------
+// Backup settings (settings-table view)
+// ---------------------------------------------------------------------
+
+pub async fn load_backup_settings(pool: &SqlitePool) -> Result<BackupSettings, CoreError> {
+    let enabled = get_setting(pool, "backup_enabled")
+        .await?
+        .map(|v| v == "1")
+        .unwrap_or(true);
+    let interval_days = get_setting(pool, "backup_interval_days")
+        .await?
+        .and_then(|v| v.parse::<u32>().ok())
+        .unwrap_or(7)
+        .clamp(1, 365);
+    let keep_count = get_setting(pool, "backup_keep_count")
+        .await?
+        .and_then(|v| v.parse::<u32>().ok())
+        .unwrap_or(4)
+        .clamp(1, 100);
+    let last_backup_at = get_setting(pool, "last_backup_at")
+        .await?
+        .and_then(|v| v.parse::<i64>().ok());
+    Ok(BackupSettings {
+        enabled,
+        interval_days,
+        keep_count,
+        last_backup_at,
+    })
+}
+
+pub async fn save_backup_settings(
+    pool: &SqlitePool,
+    settings: &BackupSettings,
+) -> Result<BackupSettings, CoreError> {
+    set_setting(pool, "backup_enabled", if settings.enabled { "1" } else { "0" }).await?;
+    set_setting(
+        pool,
+        "backup_interval_days",
+        &settings.interval_days.clamp(1, 365).to_string(),
+    )
+    .await?;
+    set_setting(
+        pool,
+        "backup_keep_count",
+        &settings.keep_count.clamp(1, 100).to_string(),
+    )
+    .await?;
+    load_backup_settings(pool).await
 }

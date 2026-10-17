@@ -115,3 +115,39 @@ pub struct UiPreset {
 
 // ---------------------------------------------------------------------
 // Backups (Google Drive)
+// ---------------------------------------------------------------------
+
+/// One row of backup history. The archive itself lives in the connected
+/// Google account's hidden app data folder; this row tracks its lifecycle.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Backup {
+    pub id: Id,
+    pub file_name: String,
+    pub drive_file_id: Option<String>,
+    pub size_bytes: Option<i64>,
+    pub status: String, // 'pending' | 'uploaded' | 'failed' | 'deleted'
+    pub error: Option<String>,
+    pub created_at: i64,
+    pub uploaded_at: Option<i64>,
+}
+
+/// The connected Google account (single row; `refresh_token` is only
+/// populated in web/server mode — see the google_account migration).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GoogleAccount {
+    pub email: Option<String>,
+    pub refresh_token: Option<String>,
+    pub scopes: String,
+    pub connected_at: i64,
+}
+
+/// User preferences for scheduled backups, mapped onto the `settings` table
+/// (keys: backup_enabled, backup_interval_days, backup_keep_count,
+/// last_backup_at).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BackupSettings {
+    pub enabled: bool,
+    pub interval_days: u32,
+    pub keep_count: u32,
+    pub last_backup_at: Option<i64>,
+}
