@@ -26,10 +26,20 @@ anyhow = "1"
 reqwest = { version = "0.12", features = ["json"] }
 tracing = "0.1"
 tracing-subscriber = "0.3"
+base64 = "0.22"
+rand = "0.8"
+sha2 = "0.10"
+url = "2"
+# .env file loading (development convenience: one root .env feeds the
+# server, the desktop app and — via Vite's envDir — the frontend)
+dotenvy = "0.15"
+# OS keychain access for the desktop refresh token (optional core feature)
+keyring = { version = "4", default-features = false, features = ["v1"] }
 
 # Tauri dependencies (only used by the desktop crate, but version pinned here)
 tauri = { version = "2", features = [] }
 tauri-plugin-sql = { version = "2", features = ["sqlite"] }
+tauri-plugin-opener = "2"
 
 
 [workspace.lints.clippy]
