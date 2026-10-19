@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { isTauri } from '@tauri-apps/api/core';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -11,15 +11,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import {
-  ChevronLeft,
-  CloudUpload,
-  Download,
-  HardDriveDownload,
-  RefreshCw,
-  Settings,
-  Sparkles,
-} from 'lucide-react';
+import { CloudUpload, Download, RefreshCw, Settings } from 'lucide-react';
 import {
   api,
   type BackupEntry,
@@ -27,11 +19,11 @@ import {
   type GoogleConfigView,
   type GoogleStatus,
 } from '@/lib/ipc';
+import { SettingsLayout } from '@/components/layout/settings-layout';
 
 /** Route: '/settings/backup'. Google Drive backup — connect, schedule,
- * back up now, and restore. Same shell as the other settings pages. */
+ * back up now, and restore. Uses the shared settings shell. */
 export function BackupPage() {
-  const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
 
   const [status, setStatus] = useState<GoogleStatus | null>(null);
@@ -49,7 +41,7 @@ export function BackupPage() {
   const [notice, setNotice] = useState<string | null>(null);
   const [restoring, setRestoring] = useState<BackupEntry | null>(null);
 
-  async function load() {
+  const load = useCallback(async () => {
     try {
       const [s, c, bs, list] = await Promise.all([
         api.googleStatus(),
@@ -66,11 +58,11 @@ export function BackupPage() {
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
-  }
+  }, []);
 
   useEffect(() => {
-    load();
-  }, []);
+    void load();
+  }, [load]);
 
   // the server bounces back here after the OAuth round-trip
   useEffect(() => {
@@ -171,7 +163,7 @@ export function BackupPage() {
     } finally {
       setBusy(null);
     }
-  }, []);
+  }, [load]);
 
   const connected = status?.connected ?? false;
   const dirty =
@@ -182,34 +174,8 @@ export function BackupPage() {
       settingsDraft.keep_count !== settings.keep_count);
 
   return (
-    <div className="min-h-screen bg-background text-ink">
-      <div className="mx-auto flex min-h-screen max-w-[1000px] px-10 py-8">
-        {/* settings nav (shared shell with /settings) */}
-        <aside className="w-48 shrink-0 pt-14">
-          <button
-            onClick={() => navigate('/')}
-            className="mb-8 flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-ink"
-          >
-            <ChevronLeft className="h-4 w-4" /> Back
-          </button>
-          <div className="mb-2 px-2 text-[11px] font-semibold tracking-widest text-muted-foreground">
-            SETTINGS
-          </div>
-          <nav className="flex flex-col gap-0.5">
-            <button
-              onClick={() => navigate('/settings')}
-              className="flex items-center gap-2 rounded-lg px-2 py-2 text-left text-sm text-muted-foreground transition-colors hover:text-ink"
-            >
-              <Sparkles className="h-4 w-4" /> Presets
-            </button>
-            <div className="flex items-center gap-2 rounded-lg bg-raised px-2 py-2 text-left text-sm font-medium text-primary">
-              <HardDriveDownload className="h-4 w-4" /> Backup
-            </div>
-          </nav>
-        </aside>
-
-        <main className="min-w-0 flex-1 pl-10">
-          <header className="mb-8">
+    <SettingsLayout section="backup">
+      <header className="mb-8">
             <h1 className="text-2xl font-semibold tracking-tight">Backup</h1>
             <p className="mt-1 text-sm text-muted-foreground">
               Archives your whole workspace to a hidden Google Drive app folder
@@ -446,8 +412,6 @@ export function BackupPage() {
               </div>
             ))}
           </div>
-        </main>
-      </div>
 
       <AlertDialog
         open={restoring !== null}
@@ -470,7 +434,7 @@ export function BackupPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </div>
+    </SettingsLayout>
   );
 }
 
