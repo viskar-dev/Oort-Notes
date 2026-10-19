@@ -63,7 +63,7 @@ import {
   type TLUiIconType,
 } from 'tldraw';
 import { useRichTextTick } from '@/features/canvas/hooks/use-rich-text-tick';
-import { useUiPresetStore } from '@/features/presets/preset-config';
+import { useUiPresetStore } from '@/stores/ui-preset-store';
 import { useViewMode } from '@/features/canvas/view-mode';
 import { tableOps, tableToMarkdown, type TableAlign, type TableShape } from '@/features/canvas/table-shape';
 import {

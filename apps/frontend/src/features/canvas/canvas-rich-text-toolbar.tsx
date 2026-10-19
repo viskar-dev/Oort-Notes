@@ -19,7 +19,8 @@ import {
   wordColorValue,
 } from '@/features/canvas/components/contextual-style-panel';
 import { useRichTextTick } from '@/features/canvas/hooks/use-rich-text-tick';
-import { ALL_COLORS, useUiPresetStore } from '@/features/presets/preset-config';
+import { ALL_COLORS } from '@/constants/presets/catalog';
+import { useUiPresetStore } from '@/stores/ui-preset-store';
 
 const colorTitle = (id: string) =>
   id

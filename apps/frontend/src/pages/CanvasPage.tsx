@@ -69,12 +69,9 @@ import { ColorMark } from '@/features/canvas/color-mark';
 import { ShapesToolbarItem } from '@/features/canvas/components/shapes-menu';
 import { exportChapterToPdf } from '@/features/canvas/export-pdf';
 import { ViewModeContext, useViewMode } from '@/features/canvas/view-mode';
-import {
-  TEXT_BASE_PX,
-  normalizeConfig,
-  useUiPresetStore,
-  type ToolId,
-} from '@/features/presets/preset-config';
+import { TEXT_BASE_PX, type ToolId } from '@/constants/presets/catalog';
+import { normalizeConfig } from '@/lib/preset-config';
+import { useUiPresetStore } from '@/stores/ui-preset-store';
 import { PortalSlot } from '@/features/canvas/components/portal-slot';
 import {
   TOPIC_DELETE,
