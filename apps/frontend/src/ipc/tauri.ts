@@ -19,7 +19,8 @@ import type {
   GoogleConnectResult,
   GoogleConfigView,
   BackupSettings,
-  BackupEntry,
+  BackupStatus,
+  DriveBackupInfo,
   BackupRun,
   RestoreResult,
 } from './transport';
@@ -91,7 +92,8 @@ export const tauriTransport: Transport = {
     invoke<void>('google_set_config', { clientId, clientSecret }),
   getBackupSettings: () => invoke<BackupSettings>('get_backup_settings'),
   updateBackupSettings: (settings) => invoke<BackupSettings>('update_backup_settings', { settings }),
-  runBackup: () => invoke<BackupRun>('run_backup_now'),
-  listBackups: () => invoke<BackupEntry[]>('list_backups'),
-  restoreBackup: (driveFileId) => invoke<RestoreResult>('restore_backup', { driveFileId }),
+  runBackup: () => invoke<BackupRun | null>('run_backup_now'),
+  getBackupStatus: () => invoke<BackupStatus>('backup_status'),
+  getDriveBackup: () => invoke<DriveBackupInfo>('drive_backup_info'),
+  importBackup: () => invoke<RestoreResult>('import_backup'),
 };

@@ -134,26 +134,25 @@ export interface GoogleConfigView {
 export interface BackupSettings {
   enabled: boolean;
   interval_days: number;
-  keep_count: number;
   last_backup_at: number | null;
 }
 
-export type BackupEntryStatus = 'pending' | 'uploaded' | 'failed' | 'deleted' | 'drive';
+/** Drives the backup card: `workspace_empty` offers the import flow on a
+ * fresh install, `dirty` means something changed since the last upload. */
+export interface BackupStatus {
+  workspace_empty: boolean;
+  dirty: boolean;
+}
 
-export interface BackupEntry {
-  drive_file_id: string | null;
-  file_name: string;
+/** The archive in the app data folder, for the import offer. */
+export interface DriveBackupInfo {
+  has_backup: boolean;
+  file_name: string | null;
   size_bytes: number | null;
-  status: BackupEntryStatus;
-  created_at: number | null;
-  uploaded_at: number | null;
-  error: string | null;
-  /** present only for entries that exist on Drive */
-  drive_created_time: string | null;
+  created_time: string | null;
 }
 
 export interface BackupRun {
-  backup_id: string;
   file_name: string;
   drive_file_id: string;
   size_bytes: number;
@@ -233,7 +232,9 @@ export interface Transport {
   setGoogleConfig(clientId: string | null, clientSecret: string | null): Promise<void>;
   getBackupSettings(): Promise<BackupSettings>;
   updateBackupSettings(settings: BackupSettings): Promise<BackupSettings>;
-  runBackup(): Promise<BackupRun>;
-  listBackups(): Promise<BackupEntry[]>;
-  restoreBackup(driveFileId: string): Promise<RestoreResult>;
+  /** `null` when the workspace is still empty (nothing was uploaded). */
+  runBackup(): Promise<BackupRun | null>;
+  getBackupStatus(): Promise<BackupStatus>;
+  getDriveBackup(): Promise<DriveBackupInfo>;
+  importBackup(): Promise<RestoreResult>;
 }

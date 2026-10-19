@@ -18,7 +18,8 @@ import type {
   GoogleConnectResult,
   GoogleConfigView,
   BackupSettings,
-  BackupEntry,
+  BackupStatus,
+  DriveBackupInfo,
   BackupRun,
   RestoreResult,
 } from './transport';
@@ -166,7 +167,8 @@ export const httpTransport: Transport = {
     put<void>('/api/google/config', { client_id: clientId, client_secret: clientSecret }),
   getBackupSettings: () => get<BackupSettings>('/api/backup/settings'),
   updateBackupSettings: (settings) => put<BackupSettings>('/api/backup/settings', settings),
-  runBackup: () => post<BackupRun>('/api/backup/run', {}),
-  listBackups: () => get<BackupEntry[]>('/api/backup/list'),
-  restoreBackup: (driveFileId) => post<RestoreResult>('/api/backup/restore', { drive_file_id: driveFileId }),
+  runBackup: () => post<BackupRun | null>('/api/backup/run', {}),
+  getBackupStatus: () => get<BackupStatus>('/api/backup/status'),
+  getDriveBackup: () => get<DriveBackupInfo>('/api/backup/drive'),
+  importBackup: () => post<RestoreResult>('/api/backup/import', {}),
 };

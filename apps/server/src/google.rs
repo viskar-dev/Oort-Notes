@@ -154,19 +154,16 @@ pub async fn callback(State(pool): State<SqlitePool>, Query(q): Query<CallbackQu
         return fail("storage");
     }
 
-    // kick off the first backup right away; if it fails the row lands in the
-    // history and the scheduler picks the retry up within 15 minutes
+    // kick off the first backup right away (skipped while the workspace is
+    // still empty, so a fresh install can import first); the scheduler
+    // picks up failures within 15 minutes
     let pool2 = pool.clone();
     tokio::spawn(async move {
         let Ok(Some(auth)) = DbTokenStore::new(pool2.clone()).load().await else {
             return;
         };
-        let settings = match repo::load_backup_settings(&pool2).await {
-            Ok(s) => s,
-            Err(_) => return,
-        };
         let client = DriveClient::new(auth.config, auth.refresh_token);
-        if let Err(e) = backup::run_backup(&pool2, &client, settings.keep_count).await {
+        if let Err(e) = backup::run_backup(&pool2, &client).await {
             tracing::warn!("first backup after connect failed: {e}");
         }
     });
@@ -264,43 +261,42 @@ async fn require_auth(pool: &SqlitePool) -> Result<backup::BackupAuth, (StatusCo
         .ok_or((StatusCode::CONFLICT, "google drive is not connected".to_string()))
 }
 
-pub async fn run_backup_now(State(pool): State<SqlitePool>) -> ApiResult<backup::BackupRun> {
-    let auth = require_auth(&pool).await?;
-    let settings = repo::load_backup_settings(&pool).await.map_err(to_status)?;
-    let client = DriveClient::new(auth.config, auth.refresh_token);
-    backup::run_backup(&pool, &client, settings.keep_count)
-        .await
-        .map(Json)
-        .map_err(to_status)
-}
-
-/// Works even when Drive is not connected: the local history still shows,
-/// minus the live Drive merge.
-pub async fn list_backups(State(pool): State<SqlitePool>) -> ApiResult<Vec<backup::BackupListEntry>> {
-    let client = match require_auth(&pool).await {
-        Ok(auth) => Some(DriveClient::new(auth.config, auth.refresh_token)),
-        // not connected / not configured: plain history rows
-        Err((StatusCode::CONFLICT, _)) => None,
-        Err(e) => return Err(e),
-    };
-    backup::list_merged(&pool, client.as_ref())
-        .await
-        .map(Json)
-        .map_err(to_status)
-}
-
-#[derive(Debug, Deserialize)]
-pub struct RestoreBody {
-    pub drive_file_id: String,
-}
-
-pub async fn restore(
+pub async fn run_backup_now(
     State(pool): State<SqlitePool>,
-    Json(body): Json<RestoreBody>,
-) -> ApiResult<backup::RestoreResult> {
+) -> ApiResult<Option<backup::BackupRun>> {
     let auth = require_auth(&pool).await?;
     let client = DriveClient::new(auth.config, auth.refresh_token);
-    backup::restore_backup(&pool, &client, &body.drive_file_id)
+    backup::run_backup(&pool, &client)
+        .await
+        .map(Json)
+        .map_err(to_status)
+}
+
+/// Local-only: "workspace still empty?" + "anything new since the last
+/// backup?". Deliberately no Drive call, so the card stays truthful and
+/// instant even when Drive is slow or unreachable.
+pub async fn backup_status(State(pool): State<SqlitePool>) -> ApiResult<backup::BackupStatus> {
+    backup::status(&pool).await.map(Json).map_err(to_status)
+}
+
+/// What sits in the app data folder, for the import offer on a fresh
+/// install. Only called when the workspace is empty.
+pub async fn drive_backup_info(
+    State(pool): State<SqlitePool>,
+) -> ApiResult<backup::DriveBackupInfo> {
+    let auth = require_auth(&pool).await?;
+    let client = DriveClient::new(auth.config, auth.refresh_token);
+    backup::drive_backup_info(&client)
+        .await
+        .map(Json)
+        .map_err(to_status)
+}
+
+/// Imports the Drive backup into this workspace (fresh-install flow).
+pub async fn import_backup(State(pool): State<SqlitePool>) -> ApiResult<backup::RestoreResult> {
+    let auth = require_auth(&pool).await?;
+    let client = DriveClient::new(auth.config, auth.refresh_token);
+    backup::import_backup(&pool, &client)
         .await
         .map(Json)
         .map_err(to_status)
@@ -318,6 +314,7 @@ pub fn routes() -> Router<SqlitePool> {
             get(get_backup_settings).put(update_backup_settings),
         )
         .route("/api/backup/run", post(run_backup_now))
-        .route("/api/backup/list", get(list_backups))
-        .route("/api/backup/restore", post(restore))
+        .route("/api/backup/status", get(backup_status))
+        .route("/api/backup/drive", get(drive_backup_info))
+        .route("/api/backup/import", post(import_backup))
 }

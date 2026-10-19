@@ -2,7 +2,7 @@ use sqlx::SqlitePool;
 
 use crate::error::CoreError;
 use crate::models::{
-    Backup, BackupSettings, Chapter, ChapterCanvas, GoogleAccount, Id, Notebook, PagePreset, Topic,
+    BackupSettings, Chapter, ChapterCanvas, GoogleAccount, Id, Notebook, PagePreset, Topic,
     TopicPage, UiPreset,
 };
 
@@ -995,109 +995,6 @@ pub async fn clear_google_account(pool: &SqlitePool) -> Result<(), CoreError> {
 }
 
 // ---------------------------------------------------------------------
-// Backups (Google Drive history)
-// ---------------------------------------------------------------------
-
-type BackupRow = (
-    String,
-    String,
-    Option<String>,
-    Option<i64>,
-    String,
-    Option<String>,
-    i64,
-    Option<i64>,
-);
-
-fn backup_from(r: BackupRow) -> Backup {
-    Backup {
-        id: r.0,
-        file_name: r.1,
-        drive_file_id: r.2,
-        size_bytes: r.3,
-        status: r.4,
-        error: r.5,
-        created_at: r.6,
-        uploaded_at: r.7,
-    }
-}
-
-const BACKUP_COLUMNS: &str =
-    "id, file_name, drive_file_id, size_bytes, status, error, created_at, uploaded_at";
-
-pub async fn create_backup(
-    pool: &SqlitePool,
-    id: &str,
-    file_name: &str,
-) -> Result<Backup, CoreError> {
-    sqlx::query("INSERT INTO backups (id, file_name, status) VALUES (?, ?, 'pending')")
-        .bind(id)
-        .bind(file_name)
-        .execute(pool)
-        .await?;
-    load_backup(pool, id).await
-}
-
-pub async fn load_backup(pool: &SqlitePool, id: &str) -> Result<Backup, CoreError> {
-    let r = sqlx::query_as::<_, BackupRow>(&format!(
-        "SELECT {BACKUP_COLUMNS} FROM backups WHERE id = ?"
-    ))
-    .bind(id)
-    .fetch_optional(pool)
-    .await?
-    .ok_or_else(|| CoreError::NotFound(format!("backup {id}")))?;
-    Ok(backup_from(r))
-}
-
-pub async fn list_backups(pool: &SqlitePool, limit: i64) -> Result<Vec<Backup>, CoreError> {
-    let rows = sqlx::query_as::<_, BackupRow>(&format!(
-        // rowid breaks same-millisecond ties so "oldest" is insertion order
-        "SELECT {BACKUP_COLUMNS} FROM backups ORDER BY created_at DESC, rowid DESC LIMIT ?"
-    ))
-    .bind(limit)
-    .fetch_all(pool)
-    .await?;
-    Ok(rows.into_iter().map(backup_from).collect())
-}
-
-pub async fn mark_backup_uploaded(
-    pool: &SqlitePool,
-    id: &str,
-    drive_file_id: &str,
-    size_bytes: i64,
-) -> Result<(), CoreError> {
-    sqlx::query(
-        "UPDATE backups
-         SET status = 'uploaded', drive_file_id = ?, size_bytes = ?, uploaded_at = ?, error = NULL
-         WHERE id = ?",
-    )
-    .bind(drive_file_id)
-    .bind(size_bytes)
-    .bind(now_ms())
-    .bind(id)
-    .execute(pool)
-    .await?;
-    Ok(())
-}
-
-pub async fn mark_backup_failed(pool: &SqlitePool, id: &str, error: &str) -> Result<(), CoreError> {
-    sqlx::query("UPDATE backups SET status = 'failed', error = ? WHERE id = ?")
-        .bind(error)
-        .bind(id)
-        .execute(pool)
-        .await?;
-    Ok(())
-}
-
-pub async fn mark_backup_deleted(pool: &SqlitePool, id: &str) -> Result<(), CoreError> {
-    sqlx::query("UPDATE backups SET status = 'deleted' WHERE id = ?")
-        .bind(id)
-        .execute(pool)
-        .await?;
-    Ok(())
-}
-
-// ---------------------------------------------------------------------
 // Backup settings (settings-table view)
 // ---------------------------------------------------------------------
 
@@ -1111,18 +1008,12 @@ pub async fn load_backup_settings(pool: &SqlitePool) -> Result<BackupSettings, C
         .and_then(|v| v.parse::<u32>().ok())
         .unwrap_or(7)
         .clamp(1, 365);
-    let keep_count = get_setting(pool, "backup_keep_count")
-        .await?
-        .and_then(|v| v.parse::<u32>().ok())
-        .unwrap_or(4)
-        .clamp(1, 100);
     let last_backup_at = get_setting(pool, "last_backup_at")
         .await?
         .and_then(|v| v.parse::<i64>().ok());
     Ok(BackupSettings {
         enabled,
         interval_days,
-        keep_count,
         last_backup_at,
     })
 }
@@ -1136,12 +1027,6 @@ pub async fn save_backup_settings(
         pool,
         "backup_interval_days",
         &settings.interval_days.clamp(1, 365).to_string(),
-    )
-    .await?;
-    set_setting(
-        pool,
-        "backup_keep_count",
-        &settings.keep_count.clamp(1, 100).to_string(),
     )
     .await?;
     load_backup_settings(pool).await

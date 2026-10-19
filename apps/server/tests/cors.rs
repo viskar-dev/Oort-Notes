@@ -18,7 +18,7 @@ async fn cors_headers_cover_google_and_backup_routes() {
         "/api/google/status",
         "/api/google/config",
         "/api/backup/settings",
-        "/api/backup/list",
+        "/api/backup/status",
         // a pre-existing route, as a control
         "/api/ping",
     ] {

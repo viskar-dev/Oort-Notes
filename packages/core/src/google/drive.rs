@@ -1,9 +1,11 @@
 //! Minimal Google Drive v3 client for the app-data space, with just the
-//! operations backups need: create (upload), list, download, delete.
+//! operations backups need: create (upload), overwrite (update), list,
+//! download, delete.
 //!
 //! Upload protocol follows
 //! <https://developers.google.com/workspace/drive/api/guides/manage-uploads>:
-//! a single multipart request up to 5 MB, and a resumable session above that.
+//! a single multipart request up to 5 MB, and a resumable session above that
+//! (the same split applies to content updates).
 //! Files are created under the `appDataFolder` parent
 //! (<https://developers.google.com/workspace/drive/api/guides/appdata>), the
 //! hidden per-app area of the user's Drive.
@@ -156,6 +158,111 @@ impl DriveClient {
         }
     }
 
+    /// Overwrites an existing file's content, keeping its Drive id. Returns
+    /// `Ok(None)` when the file is already gone (404), so callers can fall
+    /// back to creating it instead of failing the whole operation.
+    pub async fn update_json(
+        &self,
+        file_id: &str,
+        name: &str,
+        bytes: Vec<u8>,
+    ) -> Result<Option<DriveFile>, CoreError> {
+        if bytes.len() <= MULTIPART_LIMIT {
+            self.update_multipart(file_id, name, bytes).await
+        } else {
+            self.update_resumable(file_id, name, bytes).await
+        }
+    }
+
+    async fn update_multipart(
+        &self,
+        file_id: &str,
+        name: &str,
+        bytes: Vec<u8>,
+    ) -> Result<Option<DriveFile>, CoreError> {
+        let boundary = format!("oort_{}", super::oauth::random_state());
+        let metadata = update_metadata(name);
+        let body = multipart_body(&boundary, &metadata, &bytes);
+        let content_type = format!("multipart/related; boundary={boundary}");
+        let url = format!(
+            "{}/files/{}?uploadType=multipart&fields=id,name,size,createdTime",
+            self.config.endpoints.upload,
+            encode_path_segment(file_id)
+        );
+
+        let response = self
+            .authed_send(|token| {
+                self.http
+                    .patch(&url)
+                    .bearer_auth(token)
+                    .header(reqwest::header::CONTENT_TYPE, content_type.clone())
+                    .body(body.clone())
+            })
+            .await?;
+        if response.status() == reqwest::StatusCode::NOT_FOUND {
+            return Ok(None);
+        }
+        self.json_or_error(response, "drive update").await.map(Some)
+    }
+
+    async fn update_resumable(
+        &self,
+        file_id: &str,
+        name: &str,
+        bytes: Vec<u8>,
+    ) -> Result<Option<DriveFile>, CoreError> {
+        let init_url = format!(
+            "{}/files/{}?uploadType=resumable&fields=id,name,size,createdTime",
+            self.config.endpoints.upload,
+            encode_path_segment(file_id)
+        );
+        let metadata = update_metadata(name);
+        let total = bytes.len();
+
+        // 1. initiate the update session; the Location header is the URI
+        let init = self
+            .authed_send(|token| {
+                self.http
+                    .patch(&init_url)
+                    .bearer_auth(token)
+                    .header(reqwest::header::CONTENT_TYPE, "application/json; charset=UTF-8")
+                    .header("X-Upload-Content-Type", "application/json")
+                    .header("X-Upload-Content-Length", total.to_string())
+                    .body(metadata.clone())
+            })
+            .await?;
+        let status = init.status();
+        if status == reqwest::StatusCode::NOT_FOUND {
+            return Ok(None);
+        }
+        if !status.is_success() {
+            let body = init.text().await.unwrap_or_default();
+            return Err(CoreError::Google(format!(
+                "drive update session failed ({status}): {body}"
+            )));
+        }
+        let session_url = init
+            .headers()
+            .get(reqwest::header::LOCATION)
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_string)
+            .ok_or_else(|| {
+                CoreError::Google("drive update session returned no Location".to_string())
+            })?;
+
+        // 2. replace the content in one request (the documented fast path)
+        let response = self
+            .authed_send(|token| {
+                self.http
+                    .put(&session_url)
+                    .bearer_auth(token)
+                    .header(reqwest::header::CONTENT_TYPE, "application/json")
+                    .body(bytes.clone())
+            })
+            .await?;
+        self.json_or_error(response, "drive update").await.map(Some)
+    }
+
     async fn upload_multipart(&self, name: &str, bytes: Vec<u8>) -> Result<DriveFile, CoreError> {
         let boundary = format!("oort_{}", super::oauth::random_state());
         let metadata = create_metadata(name);
@@ -298,6 +405,16 @@ fn create_metadata(name: &str) -> String {
     serde_json::json!({
         "name": name,
         "parents": ["appDataFolder"],
+        "mimeType": "application/json",
+    })
+    .to_string()
+}
+
+/// Metadata for a content update: the file keeps its parent, so only the
+/// name is sent.
+fn update_metadata(name: &str) -> String {
+    serde_json::json!({
+        "name": name,
         "mimeType": "application/json",
     })
     .to_string()

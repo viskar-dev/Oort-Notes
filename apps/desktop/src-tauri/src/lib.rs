@@ -528,11 +528,11 @@ async fn google_connect(pool: State<'_, SqlitePool>) -> R<GoogleStatusView> {
         .await
         .map_err(map)?;
 
-    // 6. first backup right away, so the user sees the pipeline work; a
-    // failure lands in the history and the scheduler retries later
-    let settings = repo::load_backup_settings(&pool).await.map_err(map)?;
+    // 6. first backup right away, so the user sees the pipeline work (skipped
+    // while the workspace is still empty, so a fresh install can import
+    // first); the scheduler retries failures later
     let client = DriveClient::new(config, refresh_token);
-    if let Err(e) = backup::run_backup(&pool, &client, settings.keep_count).await {
+    if let Err(e) = backup::run_backup(&pool, &client).await {
         tracing::warn!("first backup after connect failed: {e}");
     }
 
@@ -579,36 +579,31 @@ async fn update_backup_settings(
 }
 
 #[tauri::command]
-async fn run_backup_now(pool: State<'_, SqlitePool>) -> R<backup::BackupRun> {
+async fn run_backup_now(pool: State<'_, SqlitePool>) -> R<Option<backup::BackupRun>> {
     let auth = desktop_auth(&pool).await?;
-    let settings = repo::load_backup_settings(&pool).await.map_err(map)?;
     let client = DriveClient::new(auth.config, auth.refresh_token);
-    backup::run_backup(&pool, &client, settings.keep_count)
-        .await
-        .map_err(map)
+    backup::run_backup(&pool, &client).await.map_err(map)
+}
+
+/// Local-only backup state — never blocked by an unreachable Drive.
+#[tauri::command]
+async fn backup_status(pool: State<'_, SqlitePool>) -> R<backup::BackupStatus> {
+    backup::status(&pool).await.map_err(map)
+}
+
+/// What sits in the app data folder, for the import offer on a fresh install.
+#[tauri::command]
+async fn drive_backup_info(pool: State<'_, SqlitePool>) -> R<backup::DriveBackupInfo> {
+    let auth = desktop_auth(&pool).await?;
+    let client = DriveClient::new(auth.config, auth.refresh_token);
+    backup::drive_backup_info(&client).await.map_err(map)
 }
 
 #[tauri::command]
-async fn list_backups(pool: State<'_, SqlitePool>) -> R<Vec<backup::BackupListEntry>> {
-    let client = match desktop_auth(&pool).await {
-        Ok(auth) => Some(DriveClient::new(auth.config, auth.refresh_token)),
-        Err(_) => None,
-    };
-    backup::list_merged(&pool, client.as_ref())
-        .await
-        .map_err(map)
-}
-
-#[tauri::command]
-async fn restore_backup(
-    drive_file_id: String,
-    pool: State<'_, SqlitePool>,
-) -> R<backup::RestoreResult> {
+async fn import_backup(pool: State<'_, SqlitePool>) -> R<backup::RestoreResult> {
     let auth = desktop_auth(&pool).await?;
     let client = DriveClient::new(auth.config, auth.refresh_token);
-    backup::restore_backup(&pool, &client, &drive_file_id)
-        .await
-        .map_err(map)
+    backup::import_backup(&pool, &client).await.map_err(map)
 }
 
 // =========================
@@ -682,8 +677,9 @@ pub fn run() {
             get_backup_settings,
             update_backup_settings,
             run_backup_now,
-            list_backups,
-            restore_backup,
+            backup_status,
+            drive_backup_info,
+            import_backup,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

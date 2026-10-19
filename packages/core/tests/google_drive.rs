@@ -1,11 +1,14 @@
 //! Drive client + end-to-end backup runs against a local mock of the Google
 //! OAuth and Drive APIs (a raw TCP server, so no HTTP framework is needed).
 //!
-//! Covers: multipart vs resumable upload selection, list/download/delete,
-//! 401 → token refresh → retry, the OAuth token forms, and `run_due_backup`
-//! including keep-count pruning.
+//! Covers: multipart vs resumable upload selection, in-place overwrite
+//! (content update), list/download/delete, 401 → token refresh → retry, the
+//! OAuth token forms, and the backup lifecycle — `run_due_backup` writing a
+//! single overwritten archive, the empty-workspace guard, and `import_backup`.
 
-use note_core::backup::{run_backup, run_due_backup};
+use note_core::backup::{
+    drive_backup_info, import_backup, run_backup, run_due_backup, status, workspace_fingerprint,
+};
 use note_core::google::{
     exchange_code, fetch_userinfo_email, refresh_access_token, DriveClient, Endpoints, GoogleConfig,
 };
@@ -43,6 +46,9 @@ struct MockState {
     files: Mutex<Vec<MockFile>>,
     /// name staged by the resumable-init request, consumed by the session PUT
     pending_name: Mutex<Option<String>>,
+    /// file id staged by a resumable *update* init; when set, the session PUT
+    /// overwrites that file instead of creating a new one
+    pending_update: Mutex<Option<String>>,
     token_calls: std::sync::atomic::AtomicU64,
     file_ids: AtomicU64,
     /// respond 401 to the next drive request (never to /token)
@@ -222,7 +228,21 @@ fn respond(state: &MockState, req: Recorded, addr: SocketAddr) -> MockResponse {
 
     // resumable session PUT ------------------------------------------
     if req.method == "PUT" && path == "/session/1" {
-        let name = state.pending_name.lock().unwrap().clone().unwrap_or_default();
+        let name = state.pending_name.lock().unwrap().take().unwrap_or_default();
+        let target = state.pending_update.lock().unwrap().take();
+        if let Some(id) = target {
+            // update session: replace the file's content in place
+            let mut files = state.files.lock().unwrap();
+            let Some(file) = files.iter_mut().find(|f| f.id == id) else {
+                return (404, vec![], b"{}".to_vec());
+            };
+            file.bytes = req.body;
+            if !name.is_empty() {
+                file.name = name;
+            }
+            let body = file_json(file);
+            return (200, vec![], body);
+        }
         let file = MockFile {
             id: state.next_file_id(),
             name,
@@ -239,6 +259,7 @@ fn respond(state: &MockState, req: Recorded, addr: SocketAddr) -> MockResponse {
             // the init request's body is the plain metadata json
             let name = extract_name(&req.body);
             *state.pending_name.lock().unwrap() = Some(name);
+            *state.pending_update.lock().unwrap() = None;
             let location = format!("http://{addr}/session/1");
             return (200, vec![("Location", location)], b"{}".to_vec());
         }
@@ -257,6 +278,37 @@ fn respond(state: &MockState, req: Recorded, addr: SocketAddr) -> MockResponse {
         let body = file_json(&file);
         state.files.lock().unwrap().push(file);
         return (200, vec![], body);
+    }
+
+    // content updates (same endpoint, file id in the path) -----------
+    if let Some(id) = path.strip_prefix("/upload/files/") {
+        let id = id.to_string();
+        if !state.files.lock().unwrap().iter().any(|f| f.id == id) {
+            return (404, vec![], b"{}".to_vec());
+        }
+        if query.contains("uploadType=resumable") {
+            *state.pending_name.lock().unwrap() = Some(extract_name(&req.body));
+            *state.pending_update.lock().unwrap() = Some(id);
+            let location = format!("http://{addr}/session/1");
+            return (200, vec![("Location", location)], b"{}".to_vec());
+        }
+        if query.contains("uploadType=multipart") {
+            let ct = req.content_type.clone().unwrap_or_default();
+            let (metadata, media) = parse_multipart(&ct, &req.body);
+            let name = serde_json::from_str::<serde_json::Value>(&metadata)
+                .ok()
+                .and_then(|v| v["name"].as_str().map(str::to_string))
+                .unwrap_or_default();
+            let mut files = state.files.lock().unwrap();
+            let file = files.iter_mut().find(|f| f.id == id).unwrap();
+            file.bytes = media;
+            if !name.is_empty() {
+                file.name = name;
+            }
+            let body = file_json(file);
+            return (200, vec![], body);
+        }
+        return (400, vec![], b"{}".to_vec());
     }
 
     // list -----------------------------------------------------------
@@ -427,6 +479,78 @@ async fn large_upload_uses_resumable_session() {
 }
 
 #[tokio::test]
+async fn update_overwrites_file_content_in_place() {
+    let (addr, state) = start_mock().await;
+    let client = DriveClient::new(mock_config(addr), "rt-1".to_string());
+
+    let file = client
+        .upload_json("oort-backup.json", b"first".to_vec())
+        .await
+        .unwrap();
+    let updated = client
+        .update_json(&file.id, "oort-backup.json", b"second".to_vec())
+        .await
+        .unwrap()
+        .expect("file exists, so the update succeeds");
+
+    assert_eq!(updated.id, file.id);
+    let files = state.files_snapshot();
+    assert_eq!(files.len(), 1, "no new file was created");
+    assert_eq!(files[0].bytes, b"second".to_vec());
+
+    let reqs = state.requests_snapshot();
+    let update = reqs.iter().find(|r| r.method == "PATCH").expect("PATCH sent");
+    assert!(update.path.starts_with("/upload/files/file-1"), "{}", update.path);
+    assert!(update.path.contains("uploadType=multipart"));
+    assert!(
+        !contains(&update.body, b"appDataFolder"),
+        "updates must not re-parent the file"
+    );
+
+    // a file that is already gone reports Ok(None) so callers can re-create it
+    let gone = client
+        .update_json("file-404", "oort-backup.json", b"x".to_vec())
+        .await
+        .unwrap();
+    assert!(gone.is_none());
+}
+
+#[tokio::test]
+async fn large_update_uses_resumable_session() {
+    let (addr, state) = start_mock().await;
+    let client = DriveClient::new(mock_config(addr), "rt-1".to_string());
+
+    let file = client
+        .upload_json("big.json", b"small".to_vec())
+        .await
+        .unwrap();
+    let payload = vec![b'B'; 5 * 1024 * 1024 + 1]; // past the 4 MiB cutoff
+    let updated = client
+        .update_json(&file.id, "big.json", payload.clone())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(updated.id, file.id);
+
+    let reqs = state.requests_snapshot();
+    let init = reqs
+        .iter()
+        .find(|r| r.method == "PATCH" && r.path.contains("uploadType=resumable"))
+        .expect("resumable update init sent");
+    assert!(init.path.starts_with("/upload/files/file-1"), "{}", init.path);
+    let put = reqs
+        .iter()
+        .rev()
+        .find(|r| r.method == "PUT")
+        .expect("session PUT sent");
+    assert_eq!(put.body, payload);
+
+    let files = state.files_snapshot();
+    assert_eq!(files.len(), 1, "still one file");
+    assert_eq!(files[0].bytes, payload);
+}
+
+#[tokio::test]
 async fn list_download_delete_roundtrip() {
     let (addr, _state) = start_mock().await;
     let client = DriveClient::new(mock_config(addr), "rt-1".to_string());
@@ -590,7 +714,7 @@ async fn blank_secret_is_normalized_to_nothing() {
 // ---------------------------------------------------------------------
 
 #[tokio::test]
-async fn scheduled_backup_runs_uploads_and_prunes() {
+async fn scheduled_backup_overwrites_one_archive_and_skips_empty_workspaces() {
     let (addr, state) = start_mock().await;
     let pool = init_memory_pool().await.unwrap();
 
@@ -599,7 +723,6 @@ async fn scheduled_backup_runs_uploads_and_prunes() {
     repo::save_google_account(&pool, Some("me@example.com"), Some("rt-db"), "openid email drive.appdata")
         .await
         .unwrap();
-    repo::set_setting(&pool, "backup_keep_count", "2").await.unwrap();
 
     let nb = repo::create_notebook(&pool, &new_id(), "Physics", None, None, None)
         .await
@@ -607,6 +730,11 @@ async fn scheduled_backup_runs_uploads_and_prunes() {
     repo::create_chapter(&pool, &new_id(), &nb.id, "Kinematics", "infinite", None, None, None, None, None, None)
         .await
         .unwrap();
+
+    // never backed up: dirty, and not "empty" because a notebook exists
+    let s = status(&pool).await.unwrap();
+    assert!(s.dirty);
+    assert!(!s.workspace_empty);
 
     // the store hands the client mock endpoints + the token the DB row holds;
     // this mirrors what DbTokenStore produces in production
@@ -616,49 +744,135 @@ async fn scheduled_backup_runs_uploads_and_prunes() {
     };
 
     let run1 = run_due_backup(&pool, &store).await.unwrap();
-    assert!(run1.is_some(), "first backup is due (never ran before)");
-    let run1 = run1.unwrap();
-    assert_eq!(run1.drive_file_id, "file-1");
+    let run1 = run1.expect("first backup is due (never ran before)");
+    assert_eq!(run1.file_name, "oort-backup.json");
     assert_eq!(run1.counts.notebooks, 1);
     assert_eq!(run1.counts.chapters, 1);
 
-    // not due anymore: last_backup_at was just set
+    let files = state.files_snapshot();
+    assert_eq!(files.len(), 1);
+    assert_eq!(files[0].name, "oort-backup.json");
+    let file_id = files[0].id.clone();
+    let bytes_before = files[0].bytes.clone();
+
+    // clean now: nothing changed since the upload
+    assert!(!status(&pool).await.unwrap().dirty);
+    // ...and not due anymore either: last_backup_at was just set
     assert!(run_due_backup(&pool, &store).await.unwrap().is_none());
 
-    // force two more runs by resetting the timestamp
-    for _ in 0..2 {
-        repo::set_setting(&pool, "last_backup_at", "0").await.unwrap();
-        run_due_backup(&pool, &store).await.unwrap();
-    }
+    // a change flips it back to dirty
+    repo::create_notebook(&pool, &new_id(), "Chemistry", None, None, None)
+        .await
+        .unwrap();
+    assert!(status(&pool).await.unwrap().dirty);
 
-    // keep_count = 2: three uploads happened, the oldest was pruned from
-    // Drive and its row marked deleted
+    // force the next run; it overwrites the same Drive file
+    repo::set_setting(&pool, "last_backup_at", "0").await.unwrap();
+    let run2 = run_due_backup(&pool, &store).await.unwrap().unwrap();
+    assert_eq!(run2.counts.notebooks, 2);
     let files = state.files_snapshot();
-    assert_eq!(files.len(), 2);
-    let uploaded: Vec<String> = files.iter().map(|f| f.id.clone()).collect();
-    assert!(!uploaded.contains(&"file-1".to_string()));
+    assert_eq!(files.len(), 1, "no second backup file is created");
+    assert_eq!(files[0].id, file_id, "the same file was overwritten");
+    assert_ne!(files[0].bytes, bytes_before, "content was replaced");
+    assert!(!status(&pool).await.unwrap().dirty);
 
-    let rows = repo::list_backups(&pool, 100).await.unwrap();
-    assert_eq!(rows.iter().filter(|r| r.status == "uploaded").count(), 2);
-    assert_eq!(rows.iter().filter(|r| r.status == "deleted").count(), 1);
-    let deleted = rows.iter().find(|r| r.status == "deleted").unwrap();
-    assert_eq!(deleted.drive_file_id.as_deref(), Some("file-1"));
+    // legacy multi-backup files are cleaned up once the single file exists
+    state.files.lock().unwrap().push(MockFile {
+        id: "legacy-1".to_string(),
+        name: "oort-backup-2026-01-01-000000.json".to_string(),
+        bytes: b"old".to_vec(),
+    });
+    repo::set_setting(&pool, "last_backup_at", "0").await.unwrap();
+    run_due_backup(&pool, &store).await.unwrap().unwrap();
+    let files = state.files_snapshot();
+    assert_eq!(files.len(), 1);
+    assert_eq!(files[0].name, "oort-backup.json");
 
-    // the deleted file is really gone from the mock's storage
-    assert!(!files.iter().any(|f| f.id == "file-1"));
+    // an empty workspace never uploads (it must not clobber the archive)
+    let empty = init_memory_pool().await.unwrap();
+    assert!(status(&empty).await.unwrap().workspace_empty);
+    let requests_before = state.requests_snapshot().len();
+    let client = DriveClient::new(mock_config(addr), "rt-z".to_string());
+    assert!(run_backup(&empty, &client).await.unwrap().is_none());
+    assert_eq!(
+        state.requests_snapshot().len(),
+        requests_before,
+        "an empty workspace must not touch Drive at all"
+    );
 
-    // last_backup_at reflects the most recent run
-    let last = repo::get_setting(&pool, "last_backup_at").await.unwrap().unwrap();
-    assert_ne!(last, "0");
-
-    // a run against a dead endpoint retries, then fails; the row records it
+    // a run against a dead endpoint fails cleanly instead of half-uploading
     let dead = SocketAddr::from(([127, 0, 0, 1], 1));
     let dead_client = DriveClient::new(mock_config(dead), "rt-x".to_string());
-    let err = run_backup(&pool, &dead_client, 2).await.unwrap_err();
-    let rows = repo::list_backups(&pool, 100).await.unwrap();
-    let failed = rows.first().unwrap();
-    assert_eq!(failed.status, "failed");
-    assert!(failed.error.is_some(), "{err}");
+    assert!(run_backup(&pool, &dead_client).await.is_err());
+}
+
+#[tokio::test]
+async fn import_restores_the_backup_into_a_fresh_workspace() {
+    let (addr, state) = start_mock().await;
+    let client = DriveClient::new(mock_config(addr), "rt-1".to_string());
+
+    // a device with data uploads its backup
+    let source = init_memory_pool().await.unwrap();
+    let nb = repo::create_notebook(&source, &new_id(), "Physics", None, None, None)
+        .await
+        .unwrap();
+    repo::create_chapter(&source, &new_id(), &nb.id, "Kinematics", "infinite", None, None, None, None, None, None)
+        .await
+        .unwrap();
+    run_backup(&source, &client).await.unwrap().expect("uploaded");
+
+    // the import offer sees it
+    let info = drive_backup_info(&client).await.unwrap();
+    assert!(info.has_backup);
+    assert_eq!(info.file_name.as_deref(), Some("oort-backup.json"));
+    assert!(info.size_bytes.unwrap() > 0);
+
+    // fresh device: import brings everything over and marks it clean
+    let fresh = init_memory_pool().await.unwrap();
+    let result = import_backup(&fresh, &client).await.unwrap();
+    assert_eq!(result.notebooks, 1);
+    assert_eq!(result.chapters, 1);
+    let s = status(&fresh).await.unwrap();
+    assert!(!s.workspace_empty);
+    assert!(!s.dirty, "an imported workspace mirrors the backup exactly");
+
+    // with nothing on Drive the error is clear, not a crash
+    state.files.lock().unwrap().clear();
+    let err = import_backup(&fresh, &client).await.unwrap_err();
+    assert!(err.to_string().contains("no backup"), "{err}");
+}
+
+#[tokio::test]
+async fn fingerprint_tracks_workspace_changes() {
+    let pool = init_memory_pool().await.unwrap();
+    let empty = workspace_fingerprint(&pool).await.unwrap();
+    assert_eq!(empty, workspace_fingerprint(&pool).await.unwrap());
+
+    let nb = repo::create_notebook(&pool, &new_id(), "Physics", None, None, None)
+        .await
+        .unwrap();
+    let created = workspace_fingerprint(&pool).await.unwrap();
+    assert_ne!(empty, created);
+
+    let ch = repo::create_chapter(&pool, &new_id(), &nb.id, "Kinematics", "infinite", None, None, None, None, None, None)
+        .await
+        .unwrap();
+    let topic = repo::create_topic(&pool, &new_id(), &ch.id, "Free fall")
+        .await
+        .unwrap();
+    let with_topic = workspace_fingerprint(&pool).await.unwrap();
+    assert_ne!(created, with_topic);
+
+    // edits move the newest timestamp
+    repo::update_topic(&pool, &topic.id, Some("Free fall (revised)"), None)
+        .await
+        .unwrap();
+    assert_ne!(with_topic, workspace_fingerprint(&pool).await.unwrap());
+
+    // deletions move the counts, even soft ones
+    let after_edit = workspace_fingerprint(&pool).await.unwrap();
+    repo::soft_delete_topic(&pool, &topic.id).await.unwrap();
+    assert_ne!(after_edit, workspace_fingerprint(&pool).await.unwrap());
 }
 
 // helper types used above ------------------------------------------------

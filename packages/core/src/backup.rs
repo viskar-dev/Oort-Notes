@@ -1,6 +1,8 @@
 //! Backup archives: snapshot the whole database into one versioned JSON
-//! document, upload it to the connected Google Drive app-data space, and
-//! restore it back on demand.
+//! document and keep it up to date in the connected Google Drive app-data
+//! space, as a single file that every run overwrites. A workspace that is
+//! empty (fresh install) is never uploaded — it must not clobber a real
+//! backup the user may want to import from first.
 //!
 //! Used by both shells: the web server runs [`scheduler_loop`] with
 //! [`DbTokenStore`], the desktop app with [`KeyringTokenStore`] (feature
@@ -8,8 +10,9 @@
 //!
 //! Archive contents are the user data tables only — every row including
 //! trashed ones, with ids and timestamps preserved, so restore is faithful.
-//! `settings`, `backups` (device-local history) and the search index are
-//! deliberately not part of an archive.
+//! `settings` (which stores the backup state, see [`workspace_fingerprint`]),
+//! the legacy `backups` history table and the search index are deliberately
+//! not part of an archive.
 
 use std::future::Future;
 use std::pin::Pin;
@@ -20,7 +23,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 
 use crate::error::CoreError;
-use crate::google::{DriveClient, GoogleConfig};
+use crate::google::{DriveClient, DriveFile, GoogleConfig};
 use crate::repo;
 
 /// Bumped when the archive shape changes incompatibly. Restores of newer
@@ -189,6 +192,13 @@ impl ArchiveCounts {
             tags: data.tags.len(),
             topic_tags: data.topic_tags.len(),
         }
+    }
+
+    /// True when the archive holds workspace content worth keeping. Guards
+    /// the single backup file: a fresh install (or one with nothing but
+    /// presets) must never overwrite a real backup with an empty archive.
+    pub fn has_content(&self) -> bool {
+        self.notebooks + self.chapters + self.topics + self.topic_pages + self.chapter_canvas > 0
     }
 }
 
@@ -416,25 +426,15 @@ pub async fn build_archive(pool: &SqlitePool) -> Result<(Vec<u8>, ArchiveCounts)
     Ok((serde_json::to_vec(&archive)?, counts))
 }
 
-/// `oort-backup-2026-10-17-143000.json` (UTC timestamp; names sort
-/// chronologically, which keeps Drive listings readable).
-pub fn backup_file_name(at_ms: i64) -> String {
-    let secs = at_ms.div_euclid(1000);
-    let days = secs.div_euclid(86_400);
-    let time = secs.rem_euclid(86_400);
-    let (h, m, s) = (time / 3600, (time % 3600) / 60, time % 60);
-    // civil date from days since epoch (Howard Hinnant's algorithm)
-    let z = days + 719_468;
-    let era = z.div_euclid(146_097);
-    let doe = z.rem_euclid(146_097);
-    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
-    let y = yoe + era * 400;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let d = doy - (153 * mp + 2) / 5 + 1;
-    let month = if mp < 10 { mp + 3 } else { mp - 9 };
-    let year = if month <= 2 { y + 1 } else { y };
-    format!("oort-backup-{year:04}-{month:02}-{d:02}-{h:02}{m:02}{s:02}.json")
+/// The one backup file in the app data folder; every run overwrites it, so
+/// the user never has to pick between versions.
+pub const BACKUP_FILE_NAME: &str = "oort-backup.json";
+
+/// Files from the older multi-backup scheme (`oort-backup-<utc>.json`).
+/// Still recognized on import and cleaned up after a single-file backup
+/// succeeds, so an upgrading install converges on one archive.
+fn is_legacy_backup_name(name: &str) -> bool {
+    name.starts_with("oort-backup-") && name.ends_with(".json")
 }
 
 // ---------------------------------------------------------------------
@@ -667,163 +667,195 @@ pub async fn restore_archive(pool: &SqlitePool, bytes: &[u8]) -> Result<RestoreR
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BackupRun {
-    pub backup_id: String,
     pub file_name: String,
     pub drive_file_id: String,
     pub size_bytes: i64,
     pub counts: ArchiveCounts,
 }
 
-/// Builds an archive and uploads it as one backup. History rows are written
-/// around the upload so the UI always shows what happened. Uploaded archives
-/// beyond `keep_count` are deleted from Drive afterwards.
+/// Cheap existence check for workspace content, run before building an
+/// archive: an empty workspace is never uploaded.
+async fn has_workspace_content(pool: &SqlitePool) -> Result<bool, CoreError> {
+    let n: i64 = sqlx::query_scalar(
+        "SELECT (SELECT COUNT(*) FROM notebooks) + (SELECT COUNT(*) FROM chapters)
+              + (SELECT COUNT(*) FROM topics) + (SELECT COUNT(*) FROM topic_pages)
+              + (SELECT COUNT(*) FROM chapter_canvas)",
+    )
+    .fetch_one(pool)
+    .await?;
+    Ok(n > 0)
+}
+
+/// Builds an archive and writes it to the single backup file in the app
+/// data folder, replacing whatever the previous run left there. `Ok(None)`
+/// means the workspace is still empty — uploading it with nothing would
+/// clobber a real backup, which is exactly what the import offer on a new
+/// device protects.
 pub async fn run_backup(
     pool: &SqlitePool,
     client: &DriveClient,
-    keep_count: u32,
-) -> Result<BackupRun, CoreError> {
-    let id = repo::new_id();
-    let file_name = backup_file_name(now_ms());
-    repo::create_backup(pool, &id, &file_name).await?;
-
-    let (bytes, counts) = match build_archive(pool).await {
-        Ok(v) => v,
-        Err(e) => {
-            repo::mark_backup_failed(pool, &id, &e.to_string()).await?;
-            return Err(e);
-        }
-    };
+) -> Result<Option<BackupRun>, CoreError> {
+    if !has_workspace_content(pool).await? {
+        return Ok(None);
+    }
+    // fingerprint before the snapshot: a change racing this run then reads
+    // as "something new", never as "already backed up"
+    let fingerprint = workspace_fingerprint(pool).await?;
+    let (bytes, counts) = build_archive(pool).await?;
+    if !counts.has_content() {
+        return Ok(None);
+    }
     let size_bytes = bytes.len() as i64;
 
-    let file = match client.upload_json(&file_name, bytes).await {
-        Ok(file) => file,
-        Err(e) => {
-            repo::mark_backup_failed(pool, &id, &e.to_string()).await?;
-            return Err(e);
-        }
+    let files = client.list_appdata().await?;
+    let existing = files
+        .iter()
+        .find(|f| f.name == BACKUP_FILE_NAME)
+        .map(|f| f.id.clone());
+    let file = match existing {
+        Some(id) => match client.update_json(&id, BACKUP_FILE_NAME, bytes.clone()).await? {
+            Some(file) => file,
+            // vanished between listing and update — make it anew
+            None => client.upload_json(BACKUP_FILE_NAME, bytes).await?,
+        },
+        None => client.upload_json(BACKUP_FILE_NAME, bytes).await?,
     };
 
-    repo::mark_backup_uploaded(pool, &id, &file.id, size_bytes).await?;
     repo::set_setting(pool, "last_backup_at", &now_ms().to_string()).await?;
+    repo::set_setting(pool, "backup_fingerprint", &fingerprint).await?;
 
-    // pruning is best-effort: a failed delete must not fail the backup
-    if let Err(e) = prune(pool, client, keep_count).await {
-        tracing::warn!("backup prune failed: {e}");
+    // converge on a single archive: clear out the old multi-backup files
+    // (best effort — a failed delete must not fail the backup)
+    for legacy in files.iter().filter(|f| is_legacy_backup_name(&f.name)) {
+        if let Err(e) = client.delete(&legacy.id).await {
+            tracing::warn!("could not remove legacy backup {}: {e}", legacy.name);
+        }
     }
 
-    Ok(BackupRun {
-        backup_id: id,
-        file_name,
+    Ok(Some(BackupRun {
+        file_name: BACKUP_FILE_NAME.to_string(),
         drive_file_id: file.id,
         size_bytes,
         counts,
+    }))
+}
+
+/// Downloads the Drive backup and replaces the local workspace with it.
+/// Offered on a fresh install; afterwards the workspace mirrors the backup
+/// exactly, so it is marked clean.
+pub async fn import_backup(
+    pool: &SqlitePool,
+    client: &DriveClient,
+) -> Result<RestoreResult, CoreError> {
+    let files = client.list_appdata().await?;
+    let file = pick_backup_file(&files)
+        .ok_or_else(|| CoreError::Internal("no backup found in your Google Drive".to_string()))?;
+    let bytes = client.download(&file.id).await?;
+    let result = restore_archive(pool, &bytes).await?;
+    repo::set_setting(pool, "last_backup_at", &now_ms().to_string()).await?;
+    repo::set_setting(pool, "backup_fingerprint", &workspace_fingerprint(pool).await?).await?;
+    Ok(result)
+}
+
+// ---------------------------------------------------------------------
+// Backup state (what the UI shows: "backed up" vs "back up")
+// ---------------------------------------------------------------------
+
+/// Drives the backup card: `workspace_empty` offers the import flow on a
+/// fresh install, `dirty` means something changed since the last upload.
+/// Computed from local data only — never blocked by a Drive hiccup.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BackupStatus {
+    pub workspace_empty: bool,
+    pub dirty: bool,
+}
+
+/// The archive that sits in the app data space, for the import offer.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DriveBackupInfo {
+    pub has_backup: bool,
+    pub file_name: Option<String>,
+    pub size_bytes: Option<i64>,
+    pub created_time: Option<String>,
+}
+
+/// Stable summary of everything a backup protects. Row counts catch
+/// creations and deletions, newest timestamps catch edits, and tag
+/// assignments are compared as content (they carry no timestamps). Stored
+/// in settings after every upload; any difference means "back up again".
+pub async fn workspace_fingerprint(pool: &SqlitePool) -> Result<String, CoreError> {
+    let mut parts: Vec<serde_json::Value> = Vec::new();
+    for (table, column) in [
+        ("notebooks", "updated_at"),
+        ("chapters", "updated_at"),
+        ("topics", "updated_at"),
+        ("topic_pages", "updated_at"),
+        ("chapter_canvas", "saved_at"),
+        ("ui_presets", "updated_at"),
+        ("tags", "created_at"),
+    ] {
+        let (count, newest): (i64, i64) =
+            sqlx::query_as(&format!("SELECT COUNT(*), COALESCE(MAX({column}), 0) FROM {table}"))
+                .fetch_one(pool)
+                .await?;
+        parts.push(serde_json::json!([table, count, newest]));
+    }
+    let pairs: String = sqlx::query_scalar(
+        "SELECT COALESCE(GROUP_CONCAT(pair, '|'), '') FROM (
+             SELECT topic_id || ':' || tag_id AS pair FROM topic_tags ORDER BY topic_id, tag_id
+         )",
+    )
+    .fetch_one(pool)
+    .await?;
+    parts.push(serde_json::json!(["topic_tags", pairs]));
+    Ok(serde_json::Value::Array(parts).to_string())
+}
+
+pub async fn status(pool: &SqlitePool) -> Result<BackupStatus, CoreError> {
+    let live_notebooks: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM notebooks WHERE deleted_at IS NULL")
+            .fetch_one(pool)
+            .await?;
+    let dirty = match repo::get_setting(pool, "backup_fingerprint").await? {
+        Some(stored) => stored != workspace_fingerprint(pool).await?,
+        None => true, // never backed up
+    };
+    Ok(BackupStatus {
+        workspace_empty: live_notebooks == 0,
+        dirty,
     })
 }
 
-/// Keeps the newest `keep_count` uploaded archives, deleting older ones from
-/// Drive and marking their rows `deleted`.
-async fn prune(pool: &SqlitePool, client: &DriveClient, keep_count: u32) -> Result<(), CoreError> {
-    let rows = repo::list_backups(pool, 1000).await?;
-    let old: Vec<_> = rows
-        .iter()
-        .filter(|b| b.status == "uploaded")
-        .skip(keep_count as usize)
-        .collect();
-    for backup in old {
-        if let Some(file_id) = &backup.drive_file_id {
-            client.delete(file_id).await?;
-        }
-        repo::mark_backup_deleted(pool, &backup.id).await?;
-    }
-    Ok(())
-}
-
-/// Downloads an archive from Drive and replaces the local workspace with it.
-pub async fn restore_backup(
-    pool: &SqlitePool,
-    client: &DriveClient,
-    drive_file_id: &str,
-) -> Result<RestoreResult, CoreError> {
-    let bytes = client.download(drive_file_id).await?;
-    restore_archive(pool, &bytes).await
-}
-
-// ---------------------------------------------------------------------
-// Backup listing (Drive is the source of truth)
-// ---------------------------------------------------------------------
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BackupListEntry {
-    pub drive_file_id: Option<String>,
-    pub file_name: String,
-    pub size_bytes: Option<i64>,
-    pub status: String,
-    pub created_at: Option<i64>,
-    pub uploaded_at: Option<i64>,
-    pub error: Option<String>,
-    /// present only for entries that exist on Drive
-    pub drive_created_time: Option<String>,
-}
-
-/// Merges the local history rows with what actually sits in the app data
-/// folder: rows whose file vanished from Drive read as `deleted`, and Drive
-/// files with no local row (another device's backups) surface as `drive`.
-pub async fn list_merged(
-    pool: &SqlitePool,
-    client: Option<&DriveClient>,
-) -> Result<Vec<BackupListEntry>, CoreError> {
-    let rows = repo::list_backups(pool, 100).await?;
-    let on_drive = match client {
-        Some(c) => c.list_appdata().await.unwrap_or_default(),
-        None => Vec::new(),
-    };
-    let find_on_drive = |id: &Option<String>| {
-        id.as_deref()
-            .and_then(|id| on_drive.iter().find(|f| f.id == id))
-    };
-
-    let mut entries: Vec<BackupListEntry> = rows
-        .into_iter()
-        .map(|row| {
-            let drive = find_on_drive(&row.drive_file_id);
-            let status = if row.status == "uploaded" && drive.is_none() {
-                // file was removed from Drive outside this app
-                "deleted".to_string()
-            } else {
-                row.status.clone()
-            };
-            BackupListEntry {
-                drive_file_id: row.drive_file_id,
-                file_name: row.file_name,
-                size_bytes: drive.and_then(|f| f.size_bytes()).or(row.size_bytes),
-                status,
-                created_at: Some(row.created_at),
-                uploaded_at: row.uploaded_at,
-                error: row.error,
-                drive_created_time: drive.and_then(|f| f.created_time.clone()),
+pub async fn drive_backup_info(client: &DriveClient) -> Result<DriveBackupInfo, CoreError> {
+    let files = client.list_appdata().await?;
+    Ok(match pick_backup_file(&files) {
+        Some(file) => {
+            let size_bytes = file.size_bytes();
+            DriveBackupInfo {
+                has_backup: true,
+                file_name: Some(file.name.clone()),
+                size_bytes,
+                created_time: file.created_time.clone(),
             }
-        })
-        .collect();
-
-    let referenced: Vec<String> = entries
-        .iter()
-        .filter_map(|e| e.drive_file_id.clone())
-        .collect();
-    for file in &on_drive {
-        if !referenced.contains(&file.id) {
-            entries.push(BackupListEntry {
-                drive_file_id: Some(file.id.clone()),
-                file_name: file.name.clone(),
-                size_bytes: file.size_bytes(),
-                status: "drive".to_string(),
-                created_at: None,
-                uploaded_at: None,
-                error: None,
-                drive_created_time: file.created_time.clone(),
-            });
         }
-    }
-    Ok(entries)
+        None => DriveBackupInfo {
+            has_backup: false,
+            file_name: None,
+            size_bytes: None,
+            created_time: None,
+        },
+    })
+}
+
+/// The Drive file the app treats as "the backup": the single overwritten
+/// file, or — until one exists — the newest archive from the old
+/// multi-backup scheme. Relies on the newest-first Drive listing.
+fn pick_backup_file(files: &[DriveFile]) -> Option<DriveFile> {
+    files
+        .iter()
+        .find(|f| f.name == BACKUP_FILE_NAME)
+        .or_else(|| files.iter().find(|f| is_legacy_backup_name(&f.name)))
+        .cloned()
 }
 
 // ---------------------------------------------------------------------
@@ -966,7 +998,8 @@ fn is_due(last_backup_at: Option<i64>, interval_days: u32, now: i64) -> bool {
 
 /// One scheduler pass: runs a backup when automation is enabled, an account
 /// is connected, and the interval has elapsed. `Ok(None)` means "nothing to
-/// do"; used by the scheduler loop and safe to call from tests.
+/// do" (not due, not connected, or an empty workspace); used by the
+/// scheduler loop and safe to call from tests.
 pub async fn run_due_backup(
     pool: &SqlitePool,
     store: &dyn RefreshTokenStore,
@@ -979,7 +1012,7 @@ pub async fn run_due_backup(
         return Ok(None); // not connected
     };
     let client = DriveClient::new(auth.config, auth.refresh_token);
-    run_backup(pool, &client, settings.keep_count).await.map(Some)
+    run_backup(pool, &client).await
 }
 
 /// Background loop shared by both shells; checks every 15 minutes whether a

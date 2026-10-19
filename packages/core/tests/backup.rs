@@ -2,7 +2,7 @@
 //! database, replace-restore into a used one, and the guards (foreign
 //! archives, newer formats, unknown presets).
 
-use note_core::backup::{backup_file_name, build_archive, restore_archive};
+use note_core::backup::{build_archive, restore_archive, status, workspace_fingerprint};
 use note_core::repo::*;
 use note_core::init_memory_pool;
 use serde_json::{json, Value};
@@ -310,14 +310,31 @@ async fn restore_scrubs_unknown_page_preset() {
 }
 
 #[tokio::test]
-async fn backup_file_names_are_utc_timestamps() {
-    assert_eq!(backup_file_name(0), "oort-backup-1970-01-01-000000.json");
-    assert_eq!(
-        backup_file_name(1_700_000_000_000),
-        "oort-backup-2023-11-14-221320.json"
-    );
-    assert_eq!(
-        backup_file_name(1_709_164_800_000),
-        "oort-backup-2024-02-29-000000.json"
-    );
+async fn backup_state_tracks_what_a_fresh_install_needs() {
+    // fresh workspace: empty (import offer eligible) and dirty (never backed up)
+    let pool = init_memory_pool().await.unwrap();
+    let s = status(&pool).await.unwrap();
+    assert!(s.workspace_empty);
+    assert!(s.dirty);
+
+    // after a backup or import, settings hold a fingerprint; until then the
+    // comparison baseline is deliberately "never backed up"
+    let fingerprint = workspace_fingerprint(&pool).await.unwrap();
+    set_setting(&pool, "backup_fingerprint", &fingerprint).await.unwrap();
+    let s = status(&pool).await.unwrap();
+    assert!(s.workspace_empty, "still empty");
+    assert!(!s.dirty, "fingerprint matches the stored one");
+
+    // content makes it non-empty and changes the fingerprint
+    create_notebook(&pool, &new_id(), "Physics", None, None, None)
+        .await
+        .unwrap();
+    let s = status(&pool).await.unwrap();
+    assert!(!s.workspace_empty);
+    assert!(s.dirty, "a new notebook is a change");
+
+    // re-storing the current fingerprint clears dirty again
+    let fingerprint = workspace_fingerprint(&pool).await.unwrap();
+    set_setting(&pool, "backup_fingerprint", &fingerprint).await.unwrap();
+    assert!(!status(&pool).await.unwrap().dirty);
 }
