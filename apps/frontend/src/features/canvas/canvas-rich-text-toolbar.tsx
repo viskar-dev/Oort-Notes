@@ -18,7 +18,7 @@ import {
   hasActiveTextSelection,
   wordColorValue,
 } from '@/features/canvas/components/contextual-style-panel';
-import { useRichTextTick } from '@/features/canvas/hooks/use-rich-text-tick';
+import { useRichTextTick } from '@/hooks/canvas/use-rich-text-tick';
 import { ALL_COLORS } from '@/constants/presets/catalog';
 import { useUiPresetStore } from '@/stores/ui-preset-store';
 
