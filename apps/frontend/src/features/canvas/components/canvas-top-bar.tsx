@@ -1,4 +1,4 @@
-import { ChevronLeft, ChevronRight, Download, Eye, Forward, MessageCircle, Plus, Settings } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Download, Eye, Plus, Settings } from 'lucide-react';
 import { SidebarTrigger } from '@/components/ui/sidebar';
 import type { RefObject } from 'react';
 
