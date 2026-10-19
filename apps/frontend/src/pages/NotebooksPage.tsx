@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Atom,
@@ -12,10 +12,20 @@ import {
   MoreHorizontal,
   PenLine,
   Plus,
-  Search,
   Sigma,
 } from 'lucide-react';
 import { api, type Notebook, type NotebookFilter, type NotebookSort } from '../lib/ipc';
+import { APP_CONTAINER, WorkspaceLayout } from '@/components/layout/workspace-layout';
+import { useDebouncedValue } from '@/hooks/use-debounced-value';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import {
   Dialog,
   DialogContent,
@@ -51,6 +61,13 @@ function emblem(icon: string | null): LucideIcon {
   return (icon && EMBLEMS[icon.toLowerCase()]) || BookOpen;
 }
 
+/** The notebook's emblem icon element (rendered at module scope helper so
+ *  no component is minted during render). */
+function emblemIcon(icon: string | null) {
+  const Icon = emblem(icon);
+  return <Icon className="mt-3 h-5 w-5 shrink-0" strokeWidth={1.5} style={{ color: 'var(--text-3)' }} />;
+}
+
 const TABS: NotebookFilter[] = ['all', 'recent', 'favorites', 'archived'];
 const SORTS: { id: NotebookSort; label: string }[] = [
   { id: 'edited', label: 'Last edited' },
@@ -79,68 +96,67 @@ function spineOpacity(id: string): number {
   return [1, 0.7, 0.5, 0.35][Math.abs(hash) % 4];
 }
 
-function isMac(): boolean {
-  return typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform ?? navigator.userAgent);
-}
-
 export function NotebooksPage() {
   const navigate = useNavigate();
+
   const [notebooks, setNotebooks] = useState<Notebook[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [creating, setCreating] = useState(false);
-  const [renaming, setRenaming] = useState<Notebook | null>(null);
-  const [deleting, setDeleting] = useState<Notebook | null>(null);
   const [filter, setFilter] = useState<NotebookFilter>('all');
   const [sort, setSort] = useState<NotebookSort>('edited');
   const [search, setSearch] = useState('');
   const [sortOpen, setSortOpen] = useState(false);
-  const [menuFor, setMenuFor] = useState<string | null>(null);
+
+  // the backend does the filtering/sorting/searching (SQL); the page only
+  // sends the current view state and renders what comes back
+  const debouncedSearch = useDebouncedValue(search, 250);
+  const [refreshKey, setRefreshKey] = useState(0);
+  const reload = useCallback(() => setRefreshKey((k) => k + 1), []);
+
+  const [creating, setCreating] = useState(false);
+  const [renaming, setRenaming] = useState<Notebook | null>(null);
+  const [deleting, setDeleting] = useState<Notebook | null>(null);
   const [name, setName] = useState('');
   const [label, setLabel] = useState('');
   const [description, setDescription] = useState('');
   const [saving, setSaving] = useState(false);
-  const searchRef = useRef<HTMLInputElement>(null);
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
-  // the backend does the filtering/sorting/searching (SQL); the page only
-  // sends the current view state and renders what comes back
-  async function load(f: NotebookFilter, s: NotebookSort, q: string) {
-    try {
-      setError(null);
-      setNotebooks(await api.listNotebooks(f, s, q.trim() || undefined));
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    }
-  }
-
+  // single fetch effect for the list; `cancelled` drops out-of-order
+  // responses when the view state changes while a request is in flight
   useEffect(() => {
-    load(filter, sort, search);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filter, sort]);
-
-  // Ctrl/Cmd+K focuses search
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
-        e.preventDefault();
-        searchRef.current?.focus();
+    let cancelled = false;
+    (async () => {
+      try {
+        const list = await api.listNotebooks(filter, sort, debouncedSearch.trim() || undefined);
+        if (cancelled) return;
+        setNotebooks(list);
+        setError(null);
+      } catch (e) {
+        if (!cancelled) setError(e instanceof Error ? e.message : String(e));
       }
+    })();
+    return () => {
+      cancelled = true;
     };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, []);
+  }, [filter, sort, debouncedSearch, refreshKey]);
 
-  function handleSearch(value: string) {
-    setSearch(value);
-    clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => load(filter, sort, value), 250);
+  // a different tab shows a different list — start it from the top
+  useEffect(() => {
+    window.scrollTo({ top: 0 });
+  }, [filter]);
+
+  function openCreate() {
+    setName('');
+    setLabel('');
+    setDescription('');
+    setSaving(false);
+    setCreating(true);
   }
 
   async function handleDelete(nb: Notebook) {
     try {
       await api.deleteNotebook(nb.id);
       setDeleting(null);
-      await load(filter, sort, search);
+      reload();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -153,10 +169,7 @@ export function NotebooksPage() {
     try {
       await api.createNotebook(name.trim(), label.trim() || undefined, description.trim() || undefined);
       setCreating(false);
-      setName('');
-      setLabel('');
-      setDescription('');
-      await load(filter, sort, search);
+      reload();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
       setSaving(false);
@@ -166,8 +179,7 @@ export function NotebooksPage() {
   async function update(nb: Notebook, flags: { name?: string; isFavorite?: boolean; archived?: boolean }) {
     try {
       await api.updateNotebookFlags(nb.id, flags);
-      setMenuFor(null);
-      await load(filter, sort, search);
+      reload();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -179,58 +191,12 @@ export function NotebooksPage() {
   const hasQuery = search.trim() !== '';
 
   return (
-    <div className="nb-root flex min-h-screen flex-col">
-      {/* ============ top bar ============ */}
-      <header className="sticky top-0 z-30 w-full max-w-7xl m-auto flex h-14 items-center justify-between  bg-[#060608] py-10">
-        <div className="flex items-center gap-2">
-          {/* logo mark: solid dot + thin orbit ring */}
-          <svg width="20" height="20" viewBox="0 0 22 22" aria-hidden>
-            <circle cx="11" cy="11" r="5" fill="var(--text)" />
-            <ellipse
-              cx="11"
-              cy="11"
-              rx="9.5"
-              ry="4.2"
-              fill="none"
-              stroke="var(--text-3)"
-              strokeWidth="1"
-              transform="rotate(-24 11 11)"
-            />
-          </svg>
-          <span className="text-sm font-semibold text-[#f4f4f6]">Oort Notes</span>
-        </div>
-
-        <div className="flex items-center gap-3">
-          <div className="relative h-9 w-64 rounded-[10px] border border-[#24232c] bg-[#17161c] focus-within:ring-2 focus-within:ring-[#7c6ee6] focus-within:ring-offset-2 focus-within:ring-offset-[#060608]">
-            <Search
-              className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#8b8a96]"
-            />
-            <input
-              ref={searchRef}
-              value={search}
-              onChange={(e) => handleSearch(e.target.value)}
-              placeholder="Search notebooks"
-              className="h-full w-full rounded-[10px] bg-transparent pl-9 pr-16 text-[13px] text-[#f4f4f6] outline-none placeholder:text-[#8b8a96]"
-            />
-            <kbd className="pointer-events-none absolute right-2 top-1/2 flex h-5 -translate-y-1/2 items-center rounded-md border border-[#24232c] bg-[#060608] px-1.5 font-sans text-[11px] text-[#8b8a96]">
-              {isMac() ? '⌘K' : 'Ctrl K'}
-            </kbd>
-          </div>
-          <button
-            onClick={() => navigate('/settings')}
-            title="Settings"
-            className="flex size-8 items-center justify-center rounded-full border border-[#24232c] bg-[#17161c] text-[#a09fab] transition-colors hover:bg-[#1c1b22] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#7c6ee6] focus-visible:ring-offset-2 focus-visible:ring-offset-[#060608]"
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="12" cy="12" r="3" />
-              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.01a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h.01a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.01a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
-            </svg>
-          </button>
-        </div>
-      </header>
-
-      {/* ============ page header (shared container) ============ */}
-      <div className="mx-auto w-full max-w-7xl px-6 lg:px-8">
+    <WorkspaceLayout
+      search={{ value: search, onChange: setSearch, placeholder: 'Search notebooks' }}
+      crumbs={[{ label: 'Notebooks' }]}
+    >
+      {/* ============ page header ============ */}
+      <div className={APP_CONTAINER}>
         <div className="flex items-center justify-between pt-12">
           <div>
             <h1 className="text-[32px] font-semibold leading-tight tracking-tight text-[#f4f4f6]">
@@ -243,7 +209,7 @@ export function NotebooksPage() {
             </p>
           </div>
           <button
-            onClick={() => setCreating(true)}
+            onClick={openCreate}
             className="inline-flex h-10 items-center gap-2 rounded-[10px] bg-[#7c6ee6] px-4 text-sm font-medium text-white transition-colors hover:bg-[#8b7ff0] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#7c6ee6] focus-visible:ring-offset-2 focus-visible:ring-offset-[#060608]"
           >
             <Plus className="h-4 w-4" /> New notebook
@@ -259,7 +225,7 @@ export function NotebooksPage() {
 
       {/* ============ filter row: full-bleed sticky, container-aligned ============ */}
       <div className="sticky top-14 z-20 mt-8 bg-[#060608]">
-        <div className="mx-auto w-full max-w-7xl px-6 lg:px-8">
+        <div className={APP_CONTAINER}>
           <div className="flex h-12 items-center justify-between border-b border-[#24232c]">
             <div className="flex items-center gap-1">
               {TABS.map((t) => (
@@ -311,11 +277,11 @@ export function NotebooksPage() {
         </div>
       </div>
 
-      {/* ============ grid (shared container) ============ */}
-      <div className="mx-auto w-full max-w-7xl px-6 lg:px-8">
+      {/* ============ grid ============ */}
+      <div className={APP_CONTAINER}>
         {/* skeleton loading */}
         {!loaded && (
-          <div className="mt-8 grid [grid-template-columns:repeat(auto-fill,minmax(264px,1fr))] gap-x-8 gap-y-10">
+          <div className="mt-8 grid grid-cols-[repeat(auto-fill,minmax(264px,1fr))] gap-x-8 gap-y-10">
             {Array.from({ length: 8 }, (_, i) => (
               <div
                 key={i}
@@ -336,7 +302,6 @@ export function NotebooksPage() {
                   onClick={() => {
                     setSearch('');
                     setFilter('all');
-                    load('all', sort, '');
                   }}
                   className="mt-4 h-9 rounded-[10px] border border-[#24232c] px-4 text-[13px] text-[#a09fab] transition-colors hover:bg-[#17161c]"
                 >
@@ -346,7 +311,7 @@ export function NotebooksPage() {
             ) : (
               <div className="mx-auto max-w-[280px]">
                 <div
-                  onClick={() => setCreating(true)}
+                  onClick={openCreate}
                   className="nb-cover mb-8 flex cursor-pointer items-center justify-center"
                   style={{ borderStyle: 'dashed' }}
                 >
@@ -356,7 +321,7 @@ export function NotebooksPage() {
                 </div>
                 <p className="text-sm text-[#a09fab]">Create your first notebook</p>
                 <button
-                  onClick={() => setCreating(true)}
+                  onClick={openCreate}
                   className="mt-4 inline-flex h-10 items-center gap-2 rounded-[10px] bg-[#7c6ee6] px-4 text-sm font-medium text-white transition-colors hover:bg-[#8b7ff0]"
                 >
                   <Plus className="h-4 w-4" /> New notebook
@@ -375,25 +340,19 @@ export function NotebooksPage() {
                 notebook={nb}
                 filter={filter}
                 onOpen={() => navigate(`/notebooks/${nb.id}`)}
-                onMenu={() => setMenuFor(menuFor === nb.id ? null : nb.id)}
-                menuOpen={menuFor === nb.id}
-                onMenuClose={() => setMenuFor(null)}
                 onRename={() => {
-                  setMenuFor(null);
+                  setName(nb.name);
                   setRenaming(nb);
                 }}
                 onToggleFavorite={() => update(nb, { isFavorite: !nb.is_favorite })}
                 onToggleArchive={() => update(nb, { archived: nb.archived_at === null })}
-                onDelete={() => {
-                  setMenuFor(null);
-                  setDeleting(nb);
-                }}
+                onDelete={() => setDeleting(nb)}
               />
             ))}
 
             {/* dashed "New notebook" tile */}
             <button
-              onClick={() => setCreating(true)}
+              onClick={openCreate}
               className="group flex flex-col items-center justify-center gap-4 rounded-xl border border-dashed border-[#24232c] transition-colors hover:border-[#3f3f46] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#7c6ee6] focus-visible:ring-offset-2 focus-visible:ring-offset-[#060608]"
               style={{ aspectRatio: '3/4', marginRight: 8, marginBottom: 8, minHeight: 260 }}
             >
@@ -408,16 +367,6 @@ export function NotebooksPage() {
         )}
       </div>
 
-      {/* ============ footer breadcrumb bar (same shell as chapters) ============ */}
-      <footer className="sticky bottom-0 z-30 mt-auto border-t border-[#24232c] bg-[#060608]">
-        <div className="mx-auto flex h-10 w-full max-w-7xl items-center justify-between px-6 text-[13px] lg:px-8">
-          <div className="flex items-center gap-1.5">
-            <span className="font-medium text-[#f4f4f6]">Notebooks</span>
-          </div>
-          <span className="text-[#8b8a96]">Last synced just now</span>
-        </div>
-      </footer>
-
       {/* create */}
       <Dialog open={creating} onOpenChange={setCreating}>
         <DialogContent>
@@ -427,14 +376,35 @@ export function NotebooksPage() {
               Notebooks hold chapters of topics on their canvases.
             </DialogDescription>
           </DialogHeader>
-          <Field label="Name" value={name} onChange={setName} placeholder="e.g. Physics" autoFocus />
-          <Field label="Label (optional tag on the card)" value={label} onChange={setLabel} placeholder="e.g. PHYS" />
-          <Field label="Description" value={description} onChange={setDescription} placeholder="Optional" />
+          <Field
+            id="nb-create-name"
+            label="Name"
+            value={name}
+            onChange={setName}
+            placeholder="e.g. Physics"
+            autoFocus
+          />
+          <Field
+            id="nb-create-label"
+            label="Label (optional tag on the card)"
+            value={label}
+            onChange={setLabel}
+            placeholder="e.g. PHYS"
+          />
+          <Field
+            id="nb-create-description"
+            label="Description"
+            value={description}
+            onChange={setDescription}
+            placeholder="Optional"
+          />
           <DialogFooter>
-            <GhostButton onClick={() => setCreating(false)}>Cancel</GhostButton>
-            <PrimaryButton disabled={!name.trim() || saving} onClick={submit}>
+            <Button variant="ghost" onClick={() => setCreating(false)}>
+              Cancel
+            </Button>
+            <Button disabled={!name.trim() || saving} onClick={submit}>
               {saving ? 'Creating…' : 'Create'}
-            </PrimaryButton>
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -445,10 +415,19 @@ export function NotebooksPage() {
           <DialogHeader>
             <DialogTitle>Rename notebook</DialogTitle>
           </DialogHeader>
-          <Field label="Name" value={name} onChange={setName} placeholder="Notebook name" />
+          <Field
+            id="nb-rename-name"
+            label="Name"
+            value={name}
+            onChange={setName}
+            placeholder="Notebook name"
+            autoFocus
+          />
           <DialogFooter>
-            <GhostButton onClick={() => setRenaming(null)}>Cancel</GhostButton>
-            <PrimaryButton
+            <Button variant="ghost" onClick={() => setRenaming(null)}>
+              Cancel
+            </Button>
+            <Button
               disabled={!name.trim() || name.trim() === renaming?.name}
               onClick={async () => {
                 if (renaming) await update(renaming, { name: name.trim() });
@@ -456,7 +435,7 @@ export function NotebooksPage() {
               }}
             >
               Rename
-            </PrimaryButton>
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -479,7 +458,7 @@ export function NotebooksPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </div>
+    </WorkspaceLayout>
   );
 }
 
@@ -489,9 +468,6 @@ function NotebookCard({
   notebook: nb,
   filter,
   onOpen,
-  onMenu,
-  menuOpen,
-  onMenuClose,
   onRename,
   onToggleFavorite,
   onToggleArchive,
@@ -500,15 +476,11 @@ function NotebookCard({
   notebook: Notebook;
   filter: NotebookFilter;
   onOpen: () => void;
-  onMenu: () => void;
-  menuOpen: boolean;
-  onMenuClose: () => void;
   onRename: () => void;
   onToggleFavorite: () => void;
   onToggleArchive: () => void;
   onDelete: () => void;
 }) {
-  const Icon = emblem(nb.icon);
   // "NOTEBOOK" is a legacy default: treat it as empty
   const tag =
     nb.label && nb.label.toUpperCase() !== 'NOTEBOOK' && nb.label.toLowerCase() !== nb.name.toLowerCase()
@@ -554,7 +526,7 @@ function NotebookCard({
         >
           <div
             className="absolute bottom-0 left-0 top-0 w-[3px]"
-            style={{ background: 'var(--accent)', opacity: spineOpacity(nb.id) }}
+            style={{ background: 'var(--primary)', opacity: spineOpacity(nb.id) }}
           />
         </div>
 
@@ -584,7 +556,7 @@ function NotebookCard({
             </div>
           </div>
 
-          <Icon className="mt-3 h-5 w-5 shrink-0" strokeWidth={1.5} style={{ color: 'var(--text-3)' }} />
+          {emblemIcon(nb.icon)}
         </div>
 
         {/* favorite ribbon */}
@@ -593,78 +565,55 @@ function NotebookCard({
             className="absolute top-0 h-[28px] w-[16px]"
             style={{
               right: 22,
-              background: 'var(--accent)',
+              background: 'var(--primary)',
               clipPath: 'polygon(0 0, 100% 0, 100% 100%, 50% 82%, 0 100%)',
             }}
           />
         )}
       </div>
 
-      {/* three-dot menu button (hover/focus reveal) */}
-      <button
-        onClick={(e) => {
-          e.stopPropagation();
-          onMenu();
-        }}
-        title="Notebook options"
-        className={`absolute right-2 top-2 z-10 flex h-7 w-7 items-center justify-center rounded-full border opacity-0 transition-opacity focus-visible:opacity-100 group-hover:opacity-100 hover:opacity-100 ${
-          menuOpen ? 'opacity-100' : ''
-        }`}
-        style={{ background: '#14141a', borderColor: 'var(--border)', color: 'var(--text-2)' }}
-      >
-        <MoreHorizontal className="h-4 w-4" />
-      </button>
-
-      {menuOpen && (
-        <>
-          <div className="fixed inset-0 z-40" onClick={onMenuClose} />
-          <div
-            className="absolute right-2 top-10 z-50 w-[200px] rounded-[10px] border p-1 shadow-xl"
-            style={{ background: '#14141a', borderColor: 'var(--border)' }}
-          >
-            <MenuItem onClick={() => { onMenuClose(); onOpen(); }}>Open</MenuItem>
-            <MenuItem onClick={() => { onMenuClose(); onRename(); }}>Rename</MenuItem>
-            <MenuItem onClick={() => { onMenuClose(); onToggleFavorite(); }}>
-              {nb.is_favorite ? 'Remove from favorites' : 'Add to favorites'}
-            </MenuItem>
-            <MenuItem onClick={() => { onMenuClose(); onToggleArchive(); }}>
-              {archived ? 'Unarchive' : 'Archive'}
-            </MenuItem>
-            <div className="my-1 border-t" style={{ borderColor: 'var(--border)' }} />
-            <MenuItem danger onClick={onDelete}>Delete</MenuItem>
-          </div>
-        </>
-      )}
+      {/* three-dot menu (hover/focus reveal) */}
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          render={
+            <button
+              onClick={(e) => e.stopPropagation()}
+              title="Notebook options"
+              className="absolute right-2 top-2 z-10 flex h-7 w-7 items-center justify-center rounded-full border opacity-0 transition-opacity focus-visible:opacity-100 group-hover:opacity-100 hover:opacity-100 data-popup-open:opacity-100"
+              style={{ background: '#14141a', borderColor: 'var(--border)', color: 'var(--text-2)' }}
+            >
+              <MoreHorizontal className="h-4 w-4" />
+            </button>
+          }
+        />
+        <DropdownMenuContent align="end" className="w-[200px]">
+          <DropdownMenuItem onClick={onOpen}>Open</DropdownMenuItem>
+          <DropdownMenuItem onClick={onRename}>Rename</DropdownMenuItem>
+          <DropdownMenuItem onClick={onToggleFavorite}>
+            {nb.is_favorite ? 'Remove from favorites' : 'Add to favorites'}
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={onToggleArchive}>
+            {archived ? 'Unarchive' : 'Archive'}
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem variant="destructive" onClick={onDelete}>
+            Delete
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
     </div>
-  );
-}
-function MenuItem({
-  children,
-  onClick,
-  danger,
-}: {
-  children: React.ReactNode;
-  onClick: () => void;
-  danger?: boolean;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      className="flex w-full items-center rounded-md px-3 py-2 text-left text-[13px] transition-colors hover:bg-[var(--hover)]"
-      style={{ color: danger ? 'var(--danger)' : 'var(--text-2)' }}
-    >
-      {children}
-    </button>
   );
 }
 
 function Field({
+  id,
   label,
   value,
   onChange,
   placeholder,
   autoFocus,
 }: {
+  id: string;
   label: string;
   value: string;
   onChange: (v: string) => void;
@@ -672,56 +621,17 @@ function Field({
   autoFocus?: boolean;
 }) {
   return (
-    <div className="mb-4">
-      <label className="mb-1.5 block text-[13px] font-medium" style={{ color: 'var(--text-2)' }}>
+    <div className="flex flex-col gap-1.5">
+      <label htmlFor={id} className="text-[13px] font-medium text-muted-foreground">
         {label}
       </label>
-      <input
+      <Input
+        id={id}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
         autoFocus={autoFocus}
-        className="w-full rounded-lg border px-3 py-2.5 text-[15px] outline-none transition-colors focus:border-[var(--border-strong)] placeholder:text-[var(--text-3)]"
-        style={{ background: 'var(--input)', borderColor: 'var(--border)', color: 'var(--text)' }}
       />
     </div>
-  );
-}
-
-function GhostButton({ children, onClick }: { children: React.ReactNode; onClick: () => void }) {
-  return (
-    <button
-      onClick={onClick}
-      className="rounded-lg px-4 py-2.5 text-sm font-medium transition-colors hover:bg-[var(--hover)]"
-      style={{ color: 'var(--text-2)' }}
-    >
-      {children}
-    </button>
-  );
-}
-
-function PrimaryButton({
-  children,
-  onClick,
-  disabled,
-  type,
-}: {
-  children: React.ReactNode;
-  onClick?: () => void;
-  disabled?: boolean;
-  type?: 'submit';
-}) {
-  return (
-    <button
-      type={type}
-      onClick={onClick}
-      disabled={disabled}
-      className="h-10 rounded-[10px] px-4 text-sm font-medium text-white transition-colors disabled:opacity-40"
-      style={{ background: 'var(--accent)' }}
-      onMouseEnter={(e) => !disabled && (e.currentTarget.style.background = 'var(--accent-hover)')}
-      onMouseLeave={(e) => (e.currentTarget.style.background = 'var(--accent)')}
-    >
-      {children}
-    </button>
   );
 }

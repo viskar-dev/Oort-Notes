@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
   ChevronRight,
@@ -7,8 +7,6 @@ import {
   Infinity as InfinityIcon,
   MoreVertical,
   Plus,
-  Search,
-  Settings,
 } from 'lucide-react';
 import {
   api,
@@ -20,6 +18,7 @@ import {
   type UiPreset,
 } from '../lib/ipc';
 import { RouteError } from '@/pages/route-error';
+import { APP_CONTAINER, WorkspaceLayout } from '@/components/layout/workspace-layout';
 import {
   Dialog,
   DialogContent,
@@ -62,103 +61,119 @@ function canvasLabel(type: CanvasType): string {
   return type === 'page' ? 'Page' : type === 'scroll' ? 'Scroll' : 'Infinite';
 }
 
-
-
-function isMac(): boolean {
-  return typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform ?? navigator.userAgent);
-}
-
-const CONTAINER = 'mx-auto w-full max-w-7xl px-6 lg:px-8';
-
 /** Route: '/notebooks/:notebookId'. Notebooks-home shell with a two-panel
  * chapters list / topics list. */
 export function ChaptersPage() {
   const { notebookId } = useParams();
   const navigate = useNavigate();
 
-  const [notebook, setNotebook] = useState<Notebook | null>(null);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [chapters, setChapters] = useState<Chapter[] | null>(null);
+  // the route's notebook, keyed by id: a stale response for another
+  // notebook can never render, and a route change shows the loading state
+  // by derivation instead of a second render pass
+  const [notebookState, setNotebookState] = useState<{
+    id: string;
+    notebook: Notebook | null;
+    error: string | null;
+  } | null>(null);
+  const activeNotebook = notebookState?.id === notebookId ? notebookState : null;
+  const notebook = activeNotebook?.notebook ?? null;
+  const loadError = activeNotebook?.error ?? null;
+
+  // the notebook's chapters, keyed the same way on the notebook id
+  const [chaptersState, setChaptersState] = useState<{ id: string; items: Chapter[] } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [search, setSearch] = useState('');
+
+  const [refreshKey, setRefreshKey] = useState(0);
+  const reload = useCallback(() => setRefreshKey((k) => k + 1), []);
+
+  // selection + the selected chapter's topics (selection is derived below)
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [topicsState, setTopicsState] = useState<{ id: string; items: Topic[] } | null>(null);
+
   const [creating, setCreating] = useState(false);
   const [creatingTopic, setCreatingTopic] = useState(false);
   const [deleting, setDeleting] = useState<Chapter | null>(null);
-  const [search, setSearch] = useState('');
-
-  // selection + the selected chapter's topics
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [topics, setTopics] = useState<Topic[] | null>(null);
-
-  // notebook kebab menu + rename
-  const [nbMenuOpen, setNbMenuOpen] = useState(false);
+  const [deletingNotebook, setDeletingNotebook] = useState<Notebook | null>(null);
   const [renaming, setRenaming] = useState(false);
-
-  // chapter kebab menu + rename
   const [renamingChapter, setRenamingChapter] = useState<Chapter | null>(null);
 
+  // load the notebook
   useEffect(() => {
     let cancelled = false;
-    setNotebook(null);
-    setLoadError(null);
+    const id = notebookId!;
     api
-      .loadNotebook(notebookId!)
+      .loadNotebook(id)
       .then((n) => {
-        if (!cancelled) setNotebook(n);
+        if (!cancelled) setNotebookState({ id, notebook: n, error: null });
       })
       .catch((e) => {
-        if (!cancelled) setLoadError(e instanceof Error ? e.message : String(e));
+        if (!cancelled) {
+          setNotebookState({
+            id,
+            notebook: null,
+            error: e instanceof Error ? e.message : String(e),
+          });
+        }
       });
     return () => {
       cancelled = true;
     };
   }, [notebookId]);
 
-  async function load() {
-    if (!notebook) return;
-    try {
-      setError(null);
-      const list = await api.listChapters(notebook.id);
-      setChapters(list);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    }
-  }
-
+  // load the notebook's chapters
+  const notebookIdResolved = notebook?.id ?? null;
   useEffect(() => {
-    load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [notebook?.id]);
+    const id = notebookIdResolved;
+    if (!id) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const list = await api.listChapters(id);
+        if (cancelled) return;
+        setChaptersState({ id, items: list });
+        setError(null);
+      } catch (e) {
+        if (!cancelled) setError(e instanceof Error ? e.message : String(e));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [notebookIdResolved, refreshKey]);
 
-  // keep a valid selection once chapters arrive
-  useEffect(() => {
-    if (!chapters || chapters.length === 0) return;
-    if (!selectedId || !chapters.some((c) => c.id === selectedId)) {
-      setSelectedId(chapters[0].id);
-    }
-  }, [chapters, selectedId]);
+  const chapters = chaptersState?.id === notebookIdResolved ? chaptersState.items : null;
+
+  // the selection is derived: the picked chapter, or the first one
+  const selected = useMemo(
+    () => (chapters?.length ? chapters.find((c) => c.id === selectedId) ?? chapters[0] : null),
+    [chapters, selectedId],
+  );
+  const selectedResolvedId = selected?.id ?? null;
 
   // load the selected chapter's topics
   useEffect(() => {
-    if (!selectedId) return;
+    const id = selectedResolvedId;
+    if (!id) return;
     let cancelled = false;
-    setTopics(null);
     api
-      .listTopics(selectedId)
+      .listTopics(id)
       .then((t) => {
-        if (!cancelled) setTopics(t);
+        if (!cancelled) setTopicsState({ id, items: t });
       })
       .catch((e) => {
         if (!cancelled) {
           setError(e instanceof Error ? e.message : String(e));
-          setTopics([]);
+          setTopicsState({ id, items: [] });
         }
       });
     return () => {
       cancelled = true;
     };
-  }, [selectedId]);
+  }, [selectedResolvedId]);
 
-  const selected = chapters?.find((c) => c.id === selectedId) ?? null;
+  const topics = topicsState?.id === selectedResolvedId ? topicsState.items : null;
+
   const chapterIndex = selected ? (chapters?.findIndex((c) => c.id === selected.id) ?? -1) : -1;
 
   const filteredChapters = useMemo(() => {
@@ -179,7 +194,10 @@ export function ChaptersPage() {
     if (!selected) return;
     try {
       const topic = await api.createTopic(selected.id, name);
-      setTopics((prev) => (prev ? [...prev, topic] : prev));
+      setTopicsState((prev) =>
+        prev && prev.id === selected.id ? { id: prev.id, items: [...prev.items, topic] } : prev,
+      );
+      reload(); // refresh the chapter counters in the sidebar
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
       throw e;
@@ -189,7 +207,9 @@ export function ChaptersPage() {
   async function renameChapter(chapter: Chapter, name: string) {
     try {
       const updated = await api.updateChapter(chapter.id, name);
-      setChapters((prev) => (prev ? prev.map((c) => (c.id === updated.id ? updated : c)) : prev));
+      setChaptersState((prev) =>
+        prev ? { id: prev.id, items: prev.items.map((c) => (c.id === updated.id ? updated : c)) } : prev,
+      );
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
       throw e;
@@ -200,7 +220,16 @@ export function ChaptersPage() {
     try {
       await api.deleteChapter(chapter.id);
       setDeleting(null);
-      await load();
+      reload();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  async function handleDeleteNotebook(nb: Notebook) {
+    try {
+      await api.deleteNotebook(nb.id);
+      navigate('/');
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -218,57 +247,19 @@ export function ChaptersPage() {
   }
   if (!notebook) {
     return (
-      <div className="nb-root flex min-h-screen items-center justify-center text-[#8b8a96]">
+      <div className="flex min-h-screen items-center justify-center bg-[#060608] text-[#8b8a96]">
         Loading…
       </div>
     );
   }
 
   return (
-    <div className="nb-root flex min-h-screen flex-col">
-      {/* ============ top bar (same shell as the notebooks home) ============ */}
-      <header className="sticky  top-0 z-30 flex h-14 items-center justify-between border-b border-[#24232c] bg-[#060608] px-4">
-        <button onClick={() => navigate('/')} className="flex items-center gap-2" title="Back to notebooks">
-          <svg width="20" height="20" viewBox="0 0 22 22" aria-hidden>
-            <circle cx="11" cy="11" r="5" fill="#f4f4f6" />
-            <ellipse
-              cx="11"
-              cy="11"
-              rx="9.5"
-              ry="4.2"
-              fill="none"
-              stroke="#8b8a96"
-              strokeWidth="1"
-              transform="rotate(-24 11 11)"
-            />
-          </svg>
-          <span className="text-sm font-semibold text-[#f4f4f6]">Oort Notes</span>
-        </button>
-        <div className="flex items-center gap-3">
-          <div className="relative h-9 w-64 rounded-[10px] border border-[#24232c] bg-[#17161c] focus-within:ring-2 focus-within:ring-[#7c6ee6] focus-within:ring-offset-2 focus-within:ring-offset-[#060608]">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#8b8a96]" />
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search topics…"
-              className="h-full w-full rounded-[10px] bg-transparent pl-9 pr-16 text-[13px] text-[#f4f4f6] outline-none placeholder:text-[#8b8a96]"
-            />
-            <kbd className="pointer-events-none absolute right-2 top-1/2 flex h-5 -translate-y-1/2 items-center rounded-md border border-[#24232c] bg-[#060608] px-1.5 font-sans text-[11px] text-[#8b8a96]">
-              {isMac() ? '⌘K' : 'Ctrl K'}
-            </kbd>
-          </div>
-          <button
-            onClick={() => navigate('/settings')}
-            title="Settings"
-            className="flex size-8 items-center justify-center rounded-full border border-[#24232c] bg-[#17161c] text-[#a09fab] transition-colors hover:bg-[#1c1b22]"
-          >
-            <Settings className="h-4 w-4" />
-          </button>
-        </div>
-      </header>
-
+    <WorkspaceLayout
+      search={{ value: search, onChange: setSearch, placeholder: 'Search chapters and topics' }}
+      crumbs={[{ label: 'Notebooks', to: '/' }, { label: notebook.name }]}
+    >
       {/* ============ page header ============ */}
-      <div className={CONTAINER}>
+      <div className={APP_CONTAINER}>
         <div className="flex items-start justify-between pt-12">
           <div>
             <h1 className="text-[32px] font-semibold leading-tight tracking-tight text-[#f4f4f6]">
@@ -280,45 +271,24 @@ export function ChaptersPage() {
                 : `${chapters.length} ${chapters.length === 1 ? 'chapter' : 'chapters'} · ${totalTopics} ${totalTopics === 1 ? 'topic' : 'topics'}`}
             </p>
           </div>
-          <div className="relative">
-            <button
-              onClick={() => setNbMenuOpen((o) => !o)}
-              title="Notebook options"
-              className="flex size-8 items-center justify-center rounded-lg text-[#a09fab] transition-colors hover:bg-[#17161c] hover:text-[#f4f4f6]"
-            >
-              <MoreVertical className="h-4 w-4" />
-            </button>
-            {nbMenuOpen && (
-              <>
-                <div className="fixed inset-0 z-40" onClick={() => setNbMenuOpen(false)} />
-                <div className="absolute right-0 top-full z-50 mt-1 w-[200px] rounded-[10px] border border-[#24232c] bg-[#14141a] p-1 shadow-xl">
-                  <button
-                    onClick={() => {
-                      setNbMenuOpen(false);
-                      setRenaming(true);
-                    }}
-                    className="flex w-full items-center rounded-md px-3 py-2 text-left text-[13px] text-[#a09fab] transition-colors hover:bg-[#17161c]"
-                  >
-                    Rename notebook
-                  </button>
-                  <button
-                    onClick={() => {
-                      setNbMenuOpen(false);
-                      if (confirm(`Delete "${notebook.name}"?`)) {
-                        api
-                          .deleteNotebook(notebook.id)
-                          .then(() => navigate('/'))
-                          .catch((e) => setError(e instanceof Error ? e.message : String(e)));
-                      }
-                    }}
-                    className="flex w-full items-center rounded-md px-3 py-2 text-left text-[13px] text-[#f87171] transition-colors hover:bg-[#17161c]"
-                  >
-                    Delete notebook
-                  </button>
-                </div>
-              </>
-            )}
-          </div>
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              render={
+                <button
+                  title="Notebook options"
+                  className="flex size-8 items-center justify-center rounded-lg text-[#a09fab] transition-colors hover:bg-[#17161c] hover:text-[#f4f4f6]"
+                >
+                  <MoreVertical className="h-4 w-4" />
+                </button>
+              }
+            />
+            <DropdownMenuContent align="end" className="w-[200px]">
+              <DropdownMenuItem onClick={() => setRenaming(true)}>Rename notebook</DropdownMenuItem>
+              <DropdownMenuItem variant="destructive" onClick={() => setDeletingNotebook(notebook)}>
+                Delete notebook
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
 
         {error && (
@@ -329,7 +299,7 @@ export function ChaptersPage() {
       </div>
 
       {/* ============ two-panel body ============ */}
-      <div className={`${CONTAINER} mb-16 mt-8 flex flex-1 items-start gap-6`}>
+      <div className={`${APP_CONTAINER} mb-16 mt-8 flex flex-1 items-start gap-6`}>
         {/* chapters panel */}
         <aside className="w-[280px] shrink-0 rounded-xl border border-[#24232c] bg-[#111016]">
           <div className="flex items-center justify-between px-4 py-3.5">
@@ -357,7 +327,7 @@ export function ChaptersPage() {
               </p>
             )}
             {filteredChapters?.map((chapter, i) => {
-              const active = chapter.id === selectedId;
+              const active = chapter.id === selected?.id;
               return (
                 <div
                   key={chapter.id}
@@ -415,7 +385,7 @@ export function ChaptersPage() {
                         render={
                           <button
                             title="Chapter options"
-                            className="flex h-6 w-6 items-center justify-center rounded-md text-[#6c6c78] hover:bg-[#24232c] hover:text-[#f4f4f6]"
+                            className="flex h-6 w-6 items-center justify-center rounded-md text-[#6c6c78] hover:bg-[#24232c] hover:text-[#f4f4f6] data-popup-open:flex"
                           >
                             <MoreVertical className="h-3.5 w-3.5" />
                           </button>
@@ -509,32 +479,10 @@ export function ChaptersPage() {
         </section>
       </div>
 
-      {/* ============ footer breadcrumb bar ============ */}
-      <footer className="sticky bottom-0 z-30 mt-auto border-t border-[#24232c] bg-[#060608]">
-        <div className={`${CONTAINER} flex h-10 items-center justify-between text-[13px]`}>
-          <div className="flex items-center gap-1.5">
-            <button
-              onClick={() => navigate('/')}
-              className="text-[#8b8a96] transition-colors hover:text-[#f4f4f6]"
-            >
-              Notebooks
-            </button>
-            <span className="text-[#3f3f46]">/</span>
-            <span className="font-medium text-[#f4f4f6]">{notebook.name}</span>
-          </div>
-          <span className="text-[#8b8a96]">Last synced just now</span>
-        </div>
-      </footer>
-
       {/* ============ dialogs ============ */}
       <CreateTopicDialog open={creatingTopic} onOpenChange={setCreatingTopic} onCreate={createTopic} />
 
-      <CreateChapterModal
-        open={creating}
-        onOpenChange={setCreating}
-        notebookId={notebook.id}
-        onCreated={() => load()}
-      />
+      <CreateChapterModal open={creating} onOpenChange={setCreating} notebookId={notebook.id} onCreated={reload} />
 
       <AlertDialog open={deleting !== null} onOpenChange={(open) => !open && setDeleting(null)}>
         <AlertDialogContent>
@@ -554,6 +502,27 @@ export function ChaptersPage() {
         </AlertDialogContent>
       </AlertDialog>
 
+      <AlertDialog
+        open={deletingNotebook !== null}
+        onOpenChange={(open) => !open && setDeletingNotebook(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete "{deletingNotebook?.name}"?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This permanently removes the notebook and all of its chapters and
+              topics. This cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={() => deletingNotebook && handleDeleteNotebook(deletingNotebook)}>
+              Delete notebook
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       <Dialog open={renaming} onOpenChange={setRenaming}>
         <DialogContent>
           <DialogHeader>
@@ -563,7 +532,7 @@ export function ChaptersPage() {
             initial={notebook.name}
             onSubmit={async (name) => {
               const updated = await api.updateNotebookFlags(notebook.id, { name });
-              setNotebook(updated);
+              setNotebookState({ id: notebook.id, notebook: updated, error: null });
               setRenaming(false);
             }}
           />
@@ -584,7 +553,7 @@ export function ChaptersPage() {
           />
         </DialogContent>
       </Dialog>
-    </div>
+    </WorkspaceLayout>
   );
 }
 
@@ -653,14 +622,26 @@ function CreateChapterModal({
 
   useEffect(() => {
     if (!open) return;
+    let cancelled = false;
     api
       .listPagePresets()
-      .then(setPresets)
-      .catch((e) => setError(e instanceof Error ? e.message : String(e)));
+      .then((p) => {
+        if (!cancelled) setPresets(p);
+      })
+      .catch((e) => {
+        if (!cancelled) setError(e instanceof Error ? e.message : String(e));
+      });
     api
       .listUiPresets()
-      .then(setUiPresets)
-      .catch(() => setUiPresets([]));
+      .then((p) => {
+        if (!cancelled) setUiPresets(p);
+      })
+      .catch(() => {
+        if (!cancelled) setUiPresets([]);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [open]);
 
   const selectedPreset = presets?.find((p) => p.id === presetId);

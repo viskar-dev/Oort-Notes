@@ -244,6 +244,15 @@ body {
 }
 
 /* ================= Notebook home (settings tokens per design spec) ===== */
+/* Note: only tokens that don't collide with the shadcn theme live here.
+   The purple accent simply reuses the shadcn `--primary` token. */
+:root {
+  --text: #f4f4f6;        /* primary text */
+  --text-2: #a09fab;      /* secondary text */
+  --text-3: #8b8a96;      /* faint text */
+  --spine: #1b1a21;       /* book spine base */
+}
+
 .nb-cover {
   background-image: linear-gradient(
     135deg,
