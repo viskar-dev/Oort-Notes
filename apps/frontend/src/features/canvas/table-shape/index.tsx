@@ -26,6 +26,8 @@ import {
 // ================= types =================
 
 export type TableAlign = 'start' | 'middle' | 'end';
+/** per-row override; 'auto' defers to the column alignment */
+export type RowAlign = TableAlign | 'auto';
 
 type TableProps = {
   w: number;
@@ -36,6 +38,11 @@ type TableProps = {
   /** one entry per column */
   headerAlign: TableAlign[];
   bodyAlign: TableAlign[];
+  /**
+   * one entry per row, dominating both per-column alignments for that row;
+   * entries are only materialized once a row alignment is set ('auto' elsewhere)
+   */
+  rowAlign?: RowAlign[];
 };
 
 export type TableShape = TLBaseShape<'table', TableProps>;
@@ -65,6 +72,21 @@ const TABLE_CSS = `
 .tl-table tbody td:first-child{color:var(--tbl-label)}
 .tl-table tbody td:not(:first-child){color:var(--tbl-value);font-weight:600}
 .tl-table td.is-active,.tl-table th.is-active{box-shadow:inset 0 0 0 1px var(--tbl-accent)}
+/* lists inside cells: Tailwind's preflight strips list-style/padding, so the
+   static cell (and the ProseMirror overlay on top of it) needs it back in
+   order to look like a real list instead of plain text */
+.tl-table-cell ul,.tl-table-cell ol{margin:.2em 0;padding-left:1.4em;text-align:start}
+.tl-table-cell ul{list-style:disc}
+.tl-table-cell ul ul{list-style:circle}
+.tl-table-cell ul ul ul{list-style:square}
+.tl-table-cell ol{list-style:decimal}
+.tl-table-cell ol ol{list-style:lower-alpha}
+.tl-table-cell ol ol ol{list-style:lower-roman}
+.tl-table-cell li p{margin:0}
+.tl-table-cell-wrap .ProseMirror ul,.tl-table-cell-wrap .ProseMirror ol{margin:.2em 0;padding-left:1.4em;text-align:start}
+.tl-table-cell-wrap .ProseMirror ul{list-style:disc}
+.tl-table-cell-wrap .ProseMirror ul ul{list-style:circle}
+.tl-table-cell-wrap .ProseMirror ol{list-style:decimal}
 .tl-table-cell{min-height:1.5em;user-select:none}
 .tl-table-cell p{margin:0}
 .tl-table-cell-wrap{position:relative;min-height:1.5em}
@@ -129,10 +151,16 @@ export function tableOps(editor: Editor, id: TLShapeId) {
     addRow: () =>
       updateTable(editor, id, (p) => ({
         cells: [...p.cells, Array.from({ length: colCount(p) }, () => toRichText(''))],
+        rowAlign: p.rowAlign ? [...p.rowAlign, 'auto'] : undefined,
       })),
     removeRow: () =>
       updateTable(editor, id, (p) =>
-        p.cells.length > (p.hasHeader ? 2 : 1) ? { cells: p.cells.slice(0, -1) } : {},
+        p.cells.length > (p.hasHeader ? 2 : 1)
+          ? {
+              cells: p.cells.slice(0, -1),
+              rowAlign: p.rowAlign?.slice(0, -1),
+            }
+          : {},
       ),
     addCol: () =>
       updateTable(editor, id, (p) => ({
@@ -156,6 +184,16 @@ export function tableOps(editor: Editor, id: TLShapeId) {
         const next = [...p[kind]];
         next[col] = value;
         return { [kind]: next } as Partial<TableProps>;
+      }),
+    /** align every cell of a row (header and body alike); overrides columns */
+    setRowAlign: (row: number, value: TableAlign) =>
+      updateTable(editor, id, (p) => {
+        const next: RowAlign[] = Array.from(
+          { length: p.cells.length },
+          (_, r) => p.rowAlign?.[r] ?? 'auto',
+        );
+        next[row] = value;
+        return { rowAlign: next };
       }),
   };
 }
@@ -401,7 +439,7 @@ function TableView({ shape }: { shape: TableShape }) {
   const editor = useEditor();
   ensureStyles();
 
-  const { w, h, cells, hasHeader, headerAlign, bodyAlign } = shape.props;
+  const { w, h, cells, hasHeader, headerAlign, bodyAlign, rowAlign } = shape.props;
   const rows = cells.length;
   const cols = cells[0]?.length ?? 1;
   const ops = useMemo(() => tableOps(editor, shape.id), [editor, shape.id]);
@@ -502,15 +540,19 @@ function TableView({ shape }: { shape: TableShape }) {
   function renderRow(row: TLRichText[], r: number, header: boolean) {
     const Cell = header ? 'th' : 'td';
     const aligns = header ? headerAlign : bodyAlign;
+    const raw = rowAlign?.[r];
+    // an explicit row override dominates the per-column alignment
+    const rowOverride: TableAlign | null = raw && raw !== 'auto' ? raw : null;
     return (
       <tr key={r}>
         {row.map((richText, c) => {
           const isActive = isEditing && active?.row === r && active.col === c;
+          const align = rowOverride ?? (aligns[c] ?? 'start');
           return (
             <Cell
               key={c}
               className={isActive ? 'is-active' : undefined}
-              style={{ textAlign: cssAlign(aligns[c] ?? 'start') }}
+              style={{ textAlign: cssAlign(align) }}
               onPointerDown={(e) => {
                 lastPressed.set({ id: shape.id, row: r, col: c });
                 if (isEditing) {
@@ -559,6 +601,7 @@ function TableView({ shape }: { shape: TableShape }) {
 
 const richTextProp = T.object({ type: T.string, content: T.arrayOf(T.unknown), attrs: T.any.optional() });
 const alignProp = T.literalEnum('start', 'middle', 'end');
+const rowAlignProp = T.arrayOf(T.literalEnum('start', 'middle', 'end', 'auto')).optional();
 
 export class TableUtil extends BaseBoxShapeUtil<TableShape> {
   static override type = 'table' as const;
@@ -569,6 +612,7 @@ export class TableUtil extends BaseBoxShapeUtil<TableShape> {
     hasHeader: T.boolean,
     headerAlign: T.arrayOf(alignProp),
     bodyAlign: T.arrayOf(alignProp),
+    rowAlign: rowAlignProp,
   };
 
   override canEdit(): boolean {

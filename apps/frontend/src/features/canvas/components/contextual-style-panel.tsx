@@ -21,6 +21,7 @@ import {
   Minus,
   PanelTop,
   Plus,
+  Rows3,
   StretchHorizontal,
   StretchVertical,
   Tag,
@@ -581,7 +582,8 @@ function AlignTrio({
   onPick,
   testid,
 }: {
-  current: TableAlign;
+  /** null shows no active alignment (e.g. a row that follows its columns) */
+  current: TableAlign | null;
   onPick: (a: TableAlign) => void;
   testid: string;
 }) {
@@ -607,13 +609,15 @@ function AlignTrio({
 /** Table structure / header / alignment controls — shown when one table is selected. */
 function TableControlsGroup({ shape }: { shape: TableShape }) {
   const editor = useEditor();
-  const { cells, hasHeader, headerAlign, bodyAlign } = shape.props;
+  const { cells, hasHeader, headerAlign, bodyAlign, rowAlign } = shape.props;
+  const rows = cells.length;
   const cols = cells[0]?.length ?? 1;
   const ops = tableOps(editor, shape.id);
   const [copied, setCopied] = useState(false);
   const [headerAlignOpen, setHeaderAlignOpen] = useState(false);
   const [bodyAlignOpen, setBodyAlignOpen] = useState(false);
   const [columnsOpen, setColumnsOpen] = useState(false);
+  const [rowsAlignOpen, setRowsAlignOpen] = useState(false);
 
   const act = (label: string, fn: () => void) => {
     editor.markHistoryStoppingPoint(label);
@@ -623,6 +627,12 @@ function TableControlsGroup({ shape }: { shape: TableShape }) {
     act(`table ${kind} align`, () => {
       for (let c = 0; c < cols; c++) ops.setAlign(kind, c, value);
     });
+  };
+  // rows without an explicit override show no active alignment: they follow
+  // their columns until one is picked here
+  const rowAlignOf = (r: number): TableAlign | null => {
+    const ro = rowAlign?.[r];
+    return ro && ro !== 'auto' ? ro : null;
   };
   const closePop = (id: string, setOpen: (open: boolean) => void) => {
     // same pattern as StylePicker: closing immediately keeps the toolbar clickable
@@ -640,41 +650,41 @@ function TableControlsGroup({ shape }: { shape: TableShape }) {
     <>
       <TldrawUiButton
         type="low"
-        title="+ Row"
+        title="Add row"
         data-testid="style-picker.table.add-row"
         onMouseDown={keepCellFocus}
         onClick={() => act('table add row', ops.addRow)}
       >
-        <Plus className="mr-1 h-3 w-3" />+ Row
+        <Plus className="mr-1 h-3.5 w-3.5" />Row
       </TldrawUiButton>
       <TldrawUiButton
         type="low"
-        title="− Row"
+        title="Remove last row"
         data-testid="style-picker.table.remove-row"
-        disabled={cells.length <= (hasHeader ? 2 : 1)}
+        disabled={rows <= (hasHeader ? 2 : 1)}
         onMouseDown={keepCellFocus}
         onClick={() => act('table remove row', ops.removeRow)}
       >
-        <Minus className="mr-1 h-3 w-3" />− Row
+        <Minus className="mr-1 h-3.5 w-3.5" />Row
       </TldrawUiButton>
       <TldrawUiButton
         type="low"
-        title="+ Col"
+        title="Add column"
         data-testid="style-picker.table.add-col"
         onMouseDown={keepCellFocus}
         onClick={() => act('table add col', ops.addCol)}
       >
-        <Plus className="mr-1 h-3 w-3" />+ Col
+        <Plus className="mr-1 h-3.5 w-3.5" />Col
       </TldrawUiButton>
       <TldrawUiButton
         type="low"
-        title="− Col"
+        title="Remove last column"
         data-testid="style-picker.table.remove-col"
         disabled={cols <= 1}
         onMouseDown={keepCellFocus}
         onClick={() => act('table remove col', ops.removeCol)}
       >
-        <Minus className="mr-1 h-3 w-3" />− Col
+        <Minus className="mr-1 h-3.5 w-3.5" />Col
       </TldrawUiButton>
       <TldrawUiToolbarButton
         type="icon"
@@ -765,6 +775,36 @@ function TableControlsGroup({ shape }: { shape: TableShape }) {
                   current={bodyAlign[c] ?? 'start'}
                   testid={`style-picker.table.col-${c}-body`}
                   onPick={(a) => act(`table col ${c + 1} body align`, () => ops.setAlign('bodyAlign', c, a))}
+                />
+              </div>
+            ))}
+          </div>
+        </TldrawUiPopoverContent>
+      </TldrawUiPopover>
+
+      <TldrawUiPopover id="contextual table rows" open={rowsAlignOpen} onOpenChange={setRowsAlignOpen}>
+        <TldrawUiPopoverTrigger>
+          <TldrawUiToolbarButton
+            type="icon"
+            title="Per-row alignment (covers every cell of the row)"
+            data-testid="style-picker.table.rows"
+            onMouseDown={keepCellFocus}
+          >
+            <Rows3 className="h-4 w-4" />
+          </TldrawUiToolbarButton>
+        </TldrawUiPopoverTrigger>
+        <TldrawUiPopoverContent side="bottom" align="center" sideOffset={8}>
+          {/* stays open so several rows can be adjusted in one go */}
+          <div className="tlui-menu flex flex-col gap-1 p-1">
+            {Array.from({ length: rows }, (_, r) => (
+              <div key={r} className="flex items-center gap-2 px-1">
+                <span className="w-12 text-[10px] opacity-60">
+                  {hasHeader && r === 0 ? 'Header' : `Row ${hasHeader ? r : r + 1}`}
+                </span>
+                <AlignTrio
+                  current={rowAlignOf(r)}
+                  testid={`style-picker.table.row-${r}`}
+                  onPick={(a) => act(`table row ${r + 1} align`, () => ops.setRowAlign(r, a))}
                 />
               </div>
             ))}
