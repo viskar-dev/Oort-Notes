@@ -10,8 +10,6 @@ import {
   AlignStartHorizontal,
   AlignStartVertical,
   AlignVerticalDistributeCenter,
-  ClipboardCopy,
-  Columns3,
   Droplet,
   Eye,
   EyeOff,
@@ -21,7 +19,6 @@ import {
   Minus,
   PanelTop,
   Plus,
-  Rows3,
   StretchHorizontal,
   StretchVertical,
   Tag,
@@ -66,7 +63,7 @@ import {
 import { useRichTextTick } from '@/hooks/canvas/use-rich-text-tick';
 import { useUiPresetStore } from '@/stores/ui-preset-store';
 import { useViewMode } from '@/features/canvas/view-mode';
-import { tableOps, tableToMarkdown, type TableAlign, type TableShape } from '@/features/canvas/table-shape';
+import { tableOps, selRC, type TableAlign, type TableShape } from '@/features/canvas/table-shape';
 import {
   ICON_ORDER,
   IconSvg,
@@ -590,9 +587,9 @@ function AlignTrio({
   return (
     <>
       {TABLE_ALIGN_ITEMS.map((it) => (
-        <TldrawUiToolbarButton
+        <TldrawUiButton
           key={it.value}
-          type="icon"
+          type="low"
           title={`Align ${it.value}`}
           data-testid={`${testid}.${it.value}`}
           isActive={current === it.value}
@@ -600,7 +597,7 @@ function AlignTrio({
           onClick={() => onPick(it.value)}
         >
           <TldrawUiButtonIcon icon={it.icon} />
-        </TldrawUiToolbarButton>
+        </TldrawUiButton>
       ))}
     </>
   );
@@ -609,41 +606,53 @@ function AlignTrio({
 /** Table structure / header / alignment controls — shown when one table is selected. */
 function TableControlsGroup({ shape }: { shape: TableShape }) {
   const editor = useEditor();
-  const { cells, hasHeader, headerAlign, bodyAlign, rowAlign } = shape.props;
+  const { cells, hasHeader, bodyAlign, rowAlign } = shape.props;
   const rows = cells.length;
   const cols = cells[0]?.length ?? 1;
   const ops = tableOps(editor, shape.id);
-  const [copied, setCopied] = useState(false);
-  const [headerAlignOpen, setHeaderAlignOpen] = useState(false);
-  const [bodyAlignOpen, setBodyAlignOpen] = useState(false);
-  const [columnsOpen, setColumnsOpen] = useState(false);
-  const [rowsAlignOpen, setRowsAlignOpen] = useState(false);
+
+  // the clicked row/column (set via the table's edge handles) decides what
+  // the alignment control affects; without one it aligns the whole table
+  const sel = useValue(
+    'table rc selection for panel',
+    () => {
+      const s = selRC.get();
+      return s && s.id === shape.id ? s : null;
+    },
+    [shape.id],
+  );
 
   const act = (label: string, fn: () => void) => {
     editor.markHistoryStoppingPoint(label);
     fn();
   };
-  const setAlignAll = (kind: 'headerAlign' | 'bodyAlign', value: TableAlign) => {
-    act(`table ${kind} align`, () => {
-      for (let c = 0; c < cols; c++) ops.setAlign(kind, c, value);
-    });
-  };
+  const targetLabel = !sel
+    ? 'All'
+    : sel.kind === 'row'
+      ? hasHeader && sel.index === 0
+        ? 'Header'
+        : `Row ${hasHeader ? sel.index : sel.index + 1}`
+      : `Col ${sel.index + 1}`;
   // rows without an explicit override show no active alignment: they follow
   // their columns until one is picked here
-  const rowAlignOf = (r: number): TableAlign | null => {
-    const ro = rowAlign?.[r];
-    return ro && ro !== 'auto' ? ro : null;
-  };
-  const closePop = (id: string, setOpen: (open: boolean) => void) => {
-    // same pattern as StylePicker: closing immediately keeps the toolbar clickable
-    tlmenus.deleteOpenMenu(id, editor.contextId);
-    setOpen(false);
-  };
-  const copyMd = () => {
-    navigator.clipboard?.writeText(tableToMarkdown(editor, shape.props)).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1200);
-    });
+  const currentAlign: TableAlign | null = !sel
+    ? (bodyAlign[0] ?? 'start')
+    : sel.kind === 'row'
+      ? (() => {
+          const ro = rowAlign?.[sel.index];
+          return ro && ro !== 'auto' ? ro : null;
+        })()
+      : (bodyAlign[sel.index] ?? 'start');
+  const applyAlign = (a: TableAlign) => {
+    if (!sel) {
+      act('table align all', () => {
+        for (let c = 0; c < cols; c++) ops.setColAlign(c, a);
+      });
+    } else if (sel.kind === 'row') {
+      act(`table row ${sel.index + 1} align`, () => ops.setRowAlign(sel.index, a));
+    } else {
+      act(`table col ${sel.index + 1} align`, () => ops.setColAlign(sel.index, a));
+    }
   };
 
   return (
@@ -686,142 +695,35 @@ function TableControlsGroup({ shape }: { shape: TableShape }) {
       >
         <Minus className="mr-1 h-3.5 w-3.5" />Col
       </TldrawUiButton>
-      <TldrawUiToolbarButton
-        type="icon"
+      <TldrawUiButton
+        type="low"
         title="Toggle header row"
         data-testid="style-picker.table.header"
         isActive={hasHeader}
         onMouseDown={keepCellFocus}
         onClick={() => act('table toggle header', ops.toggleHeader)}
       >
-        <PanelTop className="h-4 w-4" />
-      </TldrawUiToolbarButton>
-
-      <TldrawUiPopover id="contextual table header align" open={headerAlignOpen} onOpenChange={setHeaderAlignOpen}>
-        <TldrawUiPopoverTrigger>
-          <TldrawUiToolbarButton
-            type="icon"
-            title="Header alignment (all columns)"
-            data-testid="style-picker.table.header-align"
-            onMouseDown={keepCellFocus}
-          >
-            <span className="text-[10px] font-semibold">H</span>
-          </TldrawUiToolbarButton>
-        </TldrawUiPopoverTrigger>
-        <TldrawUiPopoverContent side="bottom" align="center" sideOffset={8}>
-          <div className="tlui-menu grid grid-cols-3 gap-1 p-1" style={{ display: 'grid' }}>
-            <AlignTrio
-              current={headerAlign[0] ?? 'start'}
-              testid="style-picker.table.header-align-set"
-              onPick={(a) => {
-                setAlignAll('headerAlign', a);
-                closePop('contextual table header align', setHeaderAlignOpen);
-              }}
-            />
-          </div>
-        </TldrawUiPopoverContent>
-      </TldrawUiPopover>
-
-      <TldrawUiPopover id="contextual table body align" open={bodyAlignOpen} onOpenChange={setBodyAlignOpen}>
-        <TldrawUiPopoverTrigger>
-          <TldrawUiToolbarButton
-            type="icon"
-            title="Value alignment (all columns)"
-            data-testid="style-picker.table.body-align"
-            onMouseDown={keepCellFocus}
-          >
-            <span className="text-[10px] font-semibold">V</span>
-          </TldrawUiToolbarButton>
-        </TldrawUiPopoverTrigger>
-        <TldrawUiPopoverContent side="bottom" align="center" sideOffset={8}>
-          <div className="tlui-menu grid grid-cols-3 gap-1 p-1" style={{ display: 'grid' }}>
-            <AlignTrio
-              current={bodyAlign[0] ?? 'start'}
-              testid="style-picker.table.body-align-set"
-              onPick={(a) => {
-                setAlignAll('bodyAlign', a);
-                closePop('contextual table body align', setBodyAlignOpen);
-              }}
-            />
-          </div>
-        </TldrawUiPopoverContent>
-      </TldrawUiPopover>
-
-      <TldrawUiPopover id="contextual table columns" open={columnsOpen} onOpenChange={setColumnsOpen}>
-        <TldrawUiPopoverTrigger>
-          <TldrawUiToolbarButton
-            type="icon"
-            title="Per-column alignment"
-            data-testid="style-picker.table.columns"
-            onMouseDown={keepCellFocus}
-          >
-            <Columns3 className="h-4 w-4" />
-          </TldrawUiToolbarButton>
-        </TldrawUiPopoverTrigger>
-        <TldrawUiPopoverContent side="bottom" align="center" sideOffset={8}>
-          {/* stays open so several columns can be adjusted in one go */}
-          <div className="tlui-menu flex flex-col gap-1 p-1">
-            {Array.from({ length: cols }, (_, c) => (
-              <div key={c} className="flex items-center gap-2 px-1">
-                <span className="w-10 text-[10px] opacity-60">Col {c + 1}</span>
-                {hasHeader && (
-                  <AlignTrio
-                    current={headerAlign[c] ?? 'start'}
-                    testid={`style-picker.table.col-${c}-header`}
-                    onPick={(a) => act(`table col ${c + 1} header align`, () => ops.setAlign('headerAlign', c, a))}
-                  />
-                )}
-                <AlignTrio
-                  current={bodyAlign[c] ?? 'start'}
-                  testid={`style-picker.table.col-${c}-body`}
-                  onPick={(a) => act(`table col ${c + 1} body align`, () => ops.setAlign('bodyAlign', c, a))}
-                />
-              </div>
-            ))}
-          </div>
-        </TldrawUiPopoverContent>
-      </TldrawUiPopover>
-
-      <TldrawUiPopover id="contextual table rows" open={rowsAlignOpen} onOpenChange={setRowsAlignOpen}>
-        <TldrawUiPopoverTrigger>
-          <TldrawUiToolbarButton
-            type="icon"
-            title="Per-row alignment (covers every cell of the row)"
-            data-testid="style-picker.table.rows"
-            onMouseDown={keepCellFocus}
-          >
-            <Rows3 className="h-4 w-4" />
-          </TldrawUiToolbarButton>
-        </TldrawUiPopoverTrigger>
-        <TldrawUiPopoverContent side="bottom" align="center" sideOffset={8}>
-          {/* stays open so several rows can be adjusted in one go */}
-          <div className="tlui-menu flex flex-col gap-1 p-1">
-            {Array.from({ length: rows }, (_, r) => (
-              <div key={r} className="flex items-center gap-2 px-1">
-                <span className="w-12 text-[10px] opacity-60">
-                  {hasHeader && r === 0 ? 'Header' : `Row ${hasHeader ? r : r + 1}`}
-                </span>
-                <AlignTrio
-                  current={rowAlignOf(r)}
-                  testid={`style-picker.table.row-${r}`}
-                  onPick={(a) => act(`table row ${r + 1} align`, () => ops.setRowAlign(r, a))}
-                />
-              </div>
-            ))}
-          </div>
-        </TldrawUiPopoverContent>
-      </TldrawUiPopover>
-
-      <TldrawUiButton
-        type="low"
-        title="Copy as markdown"
-        data-testid="style-picker.table.copy-md"
-        onMouseDown={keepCellFocus}
-        onClick={copyMd}
-      >
-        <ClipboardCopy className="mr-1 h-3 w-3" />
-        {copied ? 'Copied' : 'Copy MD'}
+        <PanelTop className="h-3.5 w-3.5" />
       </TldrawUiButton>
+
+      <div className="flex items-center gap-1 pl-1" data-testid="style-picker.table.align-group">
+        <span className="text-[10px] font-semibold opacity-60" data-testid="style-picker.table.align-target">
+          {targetLabel}
+        </span>
+        <AlignTrio current={currentAlign} testid="style-picker.table.align" onPick={applyAlign} />
+        {sel?.kind === 'row' && (
+          <TldrawUiButton
+            type="low"
+            title="Follow column alignment"
+            data-testid="style-picker.table.align.auto"
+            isActive={rowAlign?.[sel.index] === 'auto'}
+            onMouseDown={keepCellFocus}
+            onClick={() => act(`table row ${sel.index + 1} align auto`, () => ops.setRowAlign(sel.index, 'auto'))}
+          >
+            <span className="text-[11px] font-semibold">Auto</span>
+          </TldrawUiButton>
+        )}
+      </div>
     </>
   );
 }

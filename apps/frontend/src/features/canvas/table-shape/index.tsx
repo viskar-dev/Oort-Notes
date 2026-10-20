@@ -59,6 +59,16 @@ type CellRef = { id: TLShapeId; row: number; col: number };
 const activeCell = atom<CellRef | null>('table active cell', null);
 /** the last cell the pointer went down on; decides which cell opens on double-click / Enter */
 const lastPressed = atom<CellRef | null>('table last pressed cell', null);
+/** row/column the pointer is over (crosshair tint); UI state only */
+export const hoverRC = atom<{ id: TLShapeId; row: number | null; col: number | null } | null>(
+  'table hovered row/col',
+  null,
+);
+/** clicked row/column: what the contextual panel's single alignment control targets */
+export const selRC = atom<{ id: TLShapeId; kind: 'row' | 'col'; index: number } | null>(
+  'table selected row/col',
+  null,
+);
 
 // ================= styles =================
 
@@ -72,6 +82,18 @@ const TABLE_CSS = `
 .tl-table tbody td:first-child{color:var(--tbl-label)}
 .tl-table tbody td:not(:first-child){color:var(--tbl-value);font-weight:600}
 .tl-table td.is-active,.tl-table th.is-active{box-shadow:inset 0 0 0 1px var(--tbl-accent)}
+/* row/column selection: hover crosshair tint, stronger tint for the selected
+   row/column, and slim accent handles on the edges to click-select them */
+.tl-table th,.tl-table td{position:relative}
+.tl-table td.is-hov,.tl-table th.is-hov{background:color-mix(in srgb,var(--tbl-head) 14%,transparent)}
+.tl-table td.is-sel,.tl-table th.is-sel{background:color-mix(in srgb,var(--tbl-accent) 18%,transparent)}
+.rc-handle{position:absolute;z-index:2;display:block;background:var(--tbl-accent);border-radius:3px;opacity:0;transition:opacity .12s;cursor:pointer}
+.tl-table:hover .rc-handle{opacity:.4}
+.rc-handle:hover,.rc-handle.is-on{opacity:1}
+/* placed 6px inside so tldraw's 9px selection-resize strips (pointer-events
+   all, x -4.5..4.5) don't swallow their clicks */
+.rc-row-handle{left:6px;top:6px;width:5px;height:calc(100% - 12px)}
+.rc-col-handle{top:6px;left:6px;height:5px;width:calc(100% - 12px)}
 /* lists inside cells: Tailwind's preflight strips list-style/padding, so the
    static cell (and the ProseMirror overlay on top of it) needs it back in
    order to look like a real list instead of plain text */
@@ -144,6 +166,8 @@ function updateTable(editor: Editor, id: TLShapeId, fn: (p: TableProps) => Parti
   editor.updateShape<TableShape>({ id, type: 'table', props: fn(cur.props) });
 }
 
+const setAt = <A,>(arr: A[], i: number, v: A): A[] => arr.map((x, ix) => (ix === i ? v : x));
+
 /** Structure/alignment ops on a table shape; used by the contextual style panel. */
 export function tableOps(editor: Editor, id: TLShapeId) {
   const colCount = (p: TableProps) => p.cells[0]?.length ?? 1;
@@ -186,7 +210,14 @@ export function tableOps(editor: Editor, id: TLShapeId) {
         return { [kind]: next } as Partial<TableProps>;
       }),
     /** align every cell of a row (header and body alike); overrides columns */
-    setRowAlign: (row: number, value: TableAlign) =>
+    /** align every cell of a column (header included) */
+    setColAlign: (col: number, value: TableAlign) =>
+      updateTable(editor, id, (p) => ({
+        headerAlign: setAt(p.headerAlign, col, value),
+        bodyAlign: setAt(p.bodyAlign, col, value),
+      })),
+    /** align every cell of a row (header and body alike); 'auto' restores the column-driven alignment; rows override columns */
+    setRowAlign: (row: number, value: RowAlign) =>
       updateTable(editor, id, (p) => {
         const next: RowAlign[] = Array.from(
           { length: p.cells.length },
@@ -455,6 +486,31 @@ function TableView({ shape }: { shape: TableShape }) {
     },
     [shape.id],
   );
+  const selected = useValue('table selected?', () => editor.getSelectedShapeIds().includes(shape.id), [editor, shape.id]);
+  const sel = useValue(
+    'table row/col selection',
+    () => {
+      const s = selRC.get();
+      return s && s.id === shape.id ? s : null;
+    },
+    [shape.id],
+  );
+  const hover = useValue(
+    'table row/col hover',
+    () => {
+      const hv = hoverRC.get();
+      return hv && hv.id === shape.id ? hv : null;
+    },
+    [shape.id],
+  );
+
+  // the row/column selection and crosshair only live while the shape is
+  // selected and no cell editor is open
+  useEffect(() => {
+    if (selected && !isEditing) return;
+    if (selRC.get()?.id === shape.id) selRC.set(null);
+    if (hoverRC.get()?.id === shape.id) hoverRC.set(null);
+  }, [selected, isEditing, shape.id]);
 
   // entering edit mode (double-click, Enter): open the pressed cell, else the first
   useEffect(() => {
@@ -543,22 +599,46 @@ function TableView({ shape }: { shape: TableShape }) {
     const raw = rowAlign?.[r];
     // an explicit row override dominates the per-column alignment
     const rowOverride: TableAlign | null = raw && raw !== 'auto' ? raw : null;
+    const toggleSel = (kind: 'row' | 'col', index: number) => (e: React.PointerEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const s = selRC.get();
+      if (s && s.id === shape.id && s.kind === kind && s.index === index) selRC.set(null);
+      else selRC.set({ id: shape.id, kind, index });
+    };
     return (
       <tr key={r}>
         {row.map((richText, c) => {
           const isActive = isEditing && active?.row === r && active.col === c;
           const align = rowOverride ?? (aligns[c] ?? 'start');
+          const cls =
+            [
+              isActive && 'is-active',
+              hover && (hover.row === r || hover.col === c) && 'is-hov',
+              sel?.kind === 'row' && sel.index === r && 'is-sel',
+              sel?.kind === 'col' && sel.index === c && 'is-sel',
+            ]
+              .filter(Boolean)
+              .join(' ') || undefined;
           return (
             <Cell
               key={c}
-              className={isActive ? 'is-active' : undefined}
+              className={cls}
               style={{ textAlign: cssAlign(align) }}
               onPointerDown={(e) => {
                 lastPressed.set({ id: shape.id, row: r, col: c });
+                // clicking content drops the row/column selection
+                const s = selRC.get();
+                if (s && s.id === shape.id) selRC.set(null);
                 if (isEditing) {
                   stopEventPropagation(e);
                   open(r, c);
                 }
+              }}
+              onMouseEnter={() => hoverRC.set({ id: shape.id, row: r, col: c })}
+              onMouseLeave={() => {
+                const hv = hoverRC.get();
+                if (hv && hv.id === shape.id) hoverRC.set(null);
               }}
             >
               {/* the static content owns the layout; the editor overlays it
@@ -568,6 +648,25 @@ function TableView({ shape }: { shape: TableShape }) {
                 <StaticCell richText={richText} hidden={isActive} />
                 {isActive && renderEditor(r, c)}
               </div>
+              {/* edge handles: click to select the whole row / column */}
+              {c === 0 && (
+                <span
+                  className={`rc-handle rc-row-handle${sel?.kind === 'row' && sel.index === r ? ' is-on' : ''}`}
+                  data-testid={`table.row-handle-${r}`}
+                  title="Click to select this row"
+                  onPointerDown={toggleSel('row', r)}
+                  onMouseEnter={() => hoverRC.set({ id: shape.id, row: r, col: null })}
+                />
+              )}
+              {r === 0 && (
+                <span
+                  className={`rc-handle rc-col-handle${sel?.kind === 'col' && sel.index === c ? ' is-on' : ''}`}
+                  data-testid={`table.col-handle-${c}`}
+                  title="Click to select this column"
+                  onPointerDown={toggleSel('col', c)}
+                  onMouseEnter={() => hoverRC.set({ id: shape.id, row: null, col: c })}
+                />
+              )}
             </Cell>
           );
         })}
