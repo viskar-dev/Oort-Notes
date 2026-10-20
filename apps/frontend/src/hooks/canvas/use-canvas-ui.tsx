@@ -11,6 +11,7 @@ import { ContextualStylePanel } from '@/features/canvas/components/contextual-st
 import { CanvasRichTextToolbar } from '@/features/canvas/canvas-rich-text-toolbar';
 import { PortalSlot } from '@/features/canvas/components/portal-slot';
 import { RICH_TEXT_EXTENSIONS } from '@/features/canvas/rich-text-setup';
+import { StableContextMenu } from '@/components/global/canvas/StableContextMenu';
 import { ToolbarOverride } from '@/components/global/canvas/PresetToolbar';
 import type { FitMode } from '@/hooks/canvas/use-chapter-canvas';
 
@@ -75,6 +76,7 @@ export function useCanvasUi({
           </PortalSlot>
         </>
       ),
+      ContextMenu: StableContextMenu,
       StylePanel: null,
       InFrontOfTheCanvas: ContextualStylePanel,
       RichTextToolbar: CanvasRichTextToolbar,
