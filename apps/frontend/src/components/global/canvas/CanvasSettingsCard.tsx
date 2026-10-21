@@ -40,6 +40,11 @@ export function CanvasSettingsCard({
       if (cardRef.current?.contains(target)) return;
       // the toolbar's settings button toggles the card itself
       if (target.closest?.('[data-settings-toggle]')) return;
+      // Base-UI portals the select's popup to document.body, outside the
+      // card: a pointerdown inside it is the select completing its own
+      // choice, not an outside click. Closing here would unmount the popup
+      // mid-gesture and the selection would never commit.
+      if (target.closest?.('[data-slot="select-content"]')) return;
       onClose();
     };
     document.addEventListener('pointerdown', onPointerDown, true);
@@ -51,7 +56,7 @@ export function CanvasSettingsCard({
   return (
     <div
       ref={cardRef}
-      className="absolute right-4 top-14 z-30 w-64 rounded-xl border border-line bg-surface p-4 shadow-xl"
+      className="absolute right-4 top-2 z-30 w-64 rounded-xl border border-line bg-surface p-4 shadow-xl"
     >
       <div className="mb-3 text-sm font-semibold">Settings</div>
       {isPageChapter && (
@@ -91,6 +96,9 @@ export function CanvasSettingsCard({
       </label>
       <Select
         value={chapterPresetId || 'none'}
+        // Base-UI renders the raw value in the trigger unless Root knows
+        // the items; passing the map makes the trigger show names
+        items={{ none: 'tldraw defaults', ...Object.fromEntries(uiPresets.map((p) => [p.id, p.name])) }}
         onValueChange={(v) => {
           if (v === null) return;
           onApplyPreset(v === 'none' ? '' : v);
