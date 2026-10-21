@@ -1,4 +1,4 @@
-import { ChevronLeft, ChevronRight, Download, Eye, Plus, Settings, Sticker } from 'lucide-react';import type { RefObject } from 'react';
+import { ChevronLeft, ChevronRight, Download, Eye, Plus, Settings } from 'lucide-react';import type { RefObject } from 'react';
 
 interface PageControlsProps {
   index: number;
@@ -28,8 +28,6 @@ interface CanvasTopBarProps {
   onOpenSettings: () => void;
   /** Leave the canvas, back to the chapter list in its notebook. */
   onBack: () => void;
-  /** Open the icon finder (also via `Ctrl+Alt+I`). Defined unless view mode. */
-  onOpenIcons?: () => void;
 }
 
 export function CanvasTopBar({
@@ -40,7 +38,6 @@ export function CanvasTopBar({
   pageActions,
   onOpenSettings,
   onBack,
-  onOpenIcons,
 }: CanvasTopBarProps) {
   return (
     <header className="flex h-12 shrink-0 items-center justify-between border-b border-line bg-surface px-4">
@@ -113,17 +110,6 @@ export function CanvasTopBar({
               <Plus className="h-4 w-4" />
             </button>
           </div>
-        )}
-
-        {onOpenIcons && (
-          <button
-            title="Icon finder (Ctrl+Alt+I)"
-            data-testid="topbar.icons"
-            onClick={onOpenIcons}
-            className="text-muted-foreground transition-colors hover:text-foreground"
-          >
-            <Sticker />
-          </button>
         )}
 
         <button

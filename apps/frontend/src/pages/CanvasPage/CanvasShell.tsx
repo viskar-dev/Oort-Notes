@@ -122,12 +122,16 @@ export function CanvasShell({ notebook, chapter }: { notebook: Notebook; chapter
   }, [getEditor, pageView.viewMode]);
 
   // the icon finder keyboard command: ctrl/cmd+alt+I toggles the dialog.
-  // Capture phase + stopPropagation so tldraw never sees the combo; typing
-  // contexts (cell editors, words, own dialog inputs) stay untouched, and
-  // "cmd+i" (no alt) keeps italic.
+  // The match is ALSO on `e.code` so international layouts keep working: on
+  // many of them ctrl+alt is AltGr and the reported `e.key` is a composed
+  // character other than `i`, while the physical key stays KeyI. Capture
+  // phase + stopPropagation so tldraw never sees the combo; typing contexts
+  // (cell editors, words, own dialog inputs) stay untouched, and "cmd+i"
+  // (no alt) keeps italic.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key.toLowerCase() !== 'i' || !(e.ctrlKey || e.metaKey) || !e.altKey) return;
+      const isI = e.code === 'KeyI' || e.key.toLowerCase() === 'i';
+      if (!isI || !(e.ctrlKey || e.metaKey) || !e.altKey) return;
       const t = e.target as HTMLElement | null;
       if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
       const ed = getEditor();
@@ -187,7 +191,6 @@ export function CanvasShell({ notebook, chapter }: { notebook: Notebook; chapter
             }
             onOpenSettings={() => setSettingsOpen((o) => !o)}
             onBack={() => navigate(`/notebooks/${notebook.id}`)}
-            onOpenIcons={pageView.viewMode ? undefined : () => useIconFinderStore.getState().setOpen(true)}
           />
         )}
 

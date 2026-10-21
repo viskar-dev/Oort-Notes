@@ -1,6 +1,43 @@
 import { useEffect, useRef } from 'react';
-import { DefaultContextMenu, useContainer, useMenuIsOpen } from 'tldraw';
+import {
+  DefaultContextMenu,
+  DefaultContextMenuContent,
+  TldrawUiMenuGroup,
+  TldrawUiMenuItem,
+  useContainer,
+  useMenuIsOpen,
+  useEditor,
+  useValue,
+} from 'tldraw';
 import type { TLUiContextMenuProps } from 'tldraw';
+import { useIconFinderStore } from '@/stores/icon-finder-store';
+
+/**
+ * The stock canvas context menu with the icon finder appended as its own
+ * insert-action group (not a tool; it opens the search dialog). Hidden in
+ * view mode the same way every other editing affordance is hidden there.
+ * The kbd hint needs tldraw's lowercase binding grammar — "ctrl+alt+i" —
+ * which it renders as Ctrl + Alt + I (⌘⌥I on mac).
+ */
+function OortContextMenuContent() {
+  const editor = useEditor();
+  const readonly = useValue('canvas is readonly', () => editor.getIsReadonly(), [editor]);
+  return (
+    <>
+      <DefaultContextMenuContent />
+      {!readonly && (
+        <TldrawUiMenuGroup id="oort-insert">
+          <TldrawUiMenuItem
+            id="oort-icon-finder"
+            label="Icon finder"
+            kbd="ctrl+alt+i"
+            onSelect={() => useIconFinderStore.getState().setOpen(true)}
+          />
+        </TldrawUiMenuGroup>
+      )}
+    </>
+  );
+}
 
 /**
  * Wraps tldraw's stock canvas context menu to fix its once-only bug.
@@ -45,7 +82,9 @@ const RELOCATE_FOCUS_GRACE_MS = 250;
 export function StableContextMenu(props: TLUiContextMenuProps) {
 	return (
 		<>
-			<DefaultContextMenu {...props} />
+			<DefaultContextMenu {...props}>
+				<OortContextMenuContent />
+			</DefaultContextMenu>
 			<ContextBlurGuard />
 		</>
 	);
