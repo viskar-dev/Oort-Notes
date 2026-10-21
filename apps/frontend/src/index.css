@@ -11,20 +11,36 @@
      the purple accent; set class="dark" on <html>) */
   --color-ink: #f4f4f6;        /* primary text */
   --color-faint: #8b8a96;      /* labels, divider text */
-  --color-surface: #111016;    /* sidebar, topbar (panel) */
+  --color-surface: #111016;    /* topbar (panel) */
   --color-raised: #17161c;     /* cards, active rows (hover/input) */
   --color-canvas: #060608;     /* editor background (bg) */
   --color-line: #24232c;       /* borders */
   --color-accent-strong: #7c6ee6;
 }
 
+
+
+* {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+*::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+
 html,
 body,
 #root {
   height: 100%;
+  overflow: auto;
 }
 
 body {
+
   margin: 0;
   background: var(--color-canvas);
   color: var(--color-ink);
@@ -117,14 +133,6 @@ body {
 @theme inline {
   --font-heading: var(--font-sans);
   --font-sans: 'Geist Variable', sans-serif;
-  --color-sidebar-ring: var(--sidebar-ring);
-  --color-sidebar-border: var(--sidebar-border);
-  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
-  --color-sidebar-accent: var(--sidebar-accent);
-  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
-  --color-sidebar-primary: var(--sidebar-primary);
-  --color-sidebar-foreground: var(--sidebar-foreground);
-  --color-sidebar: var(--sidebar);
   --color-chart-5: var(--chart-5);
   --color-chart-4: var(--chart-4);
   --color-chart-3: var(--chart-3);
@@ -182,14 +190,6 @@ body {
   --chart-4: oklch(0.371 0 0);
   --chart-5: oklch(0.269 0 0);
   --radius: 0.625rem;
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
 }
 
 .dark {
@@ -216,14 +216,6 @@ body {
   --chart-3: oklch(0.439 0 0);
   --chart-4: oklch(0.371 0 0);
   --chart-5: oklch(0.269 0 0);
-  --sidebar: #111016;
-  --sidebar-foreground: #f4f4f6;
-  --sidebar-primary: #7c6ee6;
-  --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: #17161c;
-  --sidebar-accent-foreground: #f4f4f6;
-  --sidebar-border: #24232c;
-  --sidebar-ring: #8b7cf6;
 }
 
 @layer base {

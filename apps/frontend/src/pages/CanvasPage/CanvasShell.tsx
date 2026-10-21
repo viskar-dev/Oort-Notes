@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Tldraw } from 'tldraw';
 import { CodeBlockUtil } from '@/features/canvas/code-block/code-block-shape';
@@ -8,36 +8,27 @@ import { pasteTextWithMath } from '@/features/canvas/math-extension';
 import { registerTablePaste, TableUtil } from '@/features/canvas/table-shape';
 import { attachEditReveal } from '@/features/canvas/rich-text-setup';
 import { CalloutCardUtil } from '@/features/canvas/card';
+import { createIconShapeAt, IconUtil } from '@/features/canvas/icon-shape';
 import { ComponentsTool } from '@/features/canvas/components-tool';
+import { IconFinder } from '@/features/canvas/components/icon-finder';
+import { useIconFinderStore } from '@/stores/icon-finder-store';
 import { PageFrameStack } from '@/features/canvas/components/page-frame-stack';
 import { ViewModeContext } from '@/features/canvas/view-mode';
-import {
-  TOPIC_DELETE,
-  TOPIC_DUPLICATE,
-  TOPIC_RENAME,
-  type TopicMenuAction,
-} from '@/features/canvas/components/topic-menu';
-import { CanvasSidebar } from '@/features/canvas/components/canvas-sidebar';
 import { CanvasTopBar } from '@/features/canvas/components/canvas-top-bar';
 import { ZoomSlotContext } from '@/components/global/canvas/PresetToolbar';
 import { CanvasSettingsCard } from '@/components/global/canvas/CanvasSettingsCard';
 import { ViewModeHint } from '@/components/global/canvas/ViewModeHint';
-import { TopicRenameDialog } from '@/components/global/canvas/TopicRenameDialog';
-import { ConfirmAlertDialog } from '@/components/global/common/ConfirmAlertDialog';
-import { SidebarInset } from '@/components/ui/sidebar';
 import { useChapterCanvas, SHEET_GAP, type CanvasDeeplink } from '@/hooks/canvas/use-chapter-canvas';
 import { useChapterPreset } from '@/hooks/canvas/use-chapter-preset';
 import { usePageView } from '@/hooks/canvas/use-page-view';
 import { useCanvasUi } from '@/hooks/canvas/use-canvas-ui';
-import type { Chapter, Notebook, Topic } from '@/lib/ipc';
+import type { Chapter, Notebook } from '@/lib/ipc';
 
-/** The mounted canvas: sidebar, top bar, tldraw editor and its slots. Pure
- *  composition — data and behavior come from hooks/features. */
+/** The mounted canvas: top bar, tldraw editor and its slots. Pure composition
+ *  — data and behavior come from hooks/features. */
 export function CanvasShell({ notebook, chapter }: { notebook: Notebook; chapter: Chapter }) {
-  const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const [renaming, setRenaming] = useState<Topic | null>(null);
-  const [confirmDelete, setConfirmDelete] = useState<Topic | null>(null);
+  const navigate = useNavigate();
   const [settingsOpen, setSettingsOpen] = useState(false);
 
   // sheet geometry, persisted locally; the refs are shared with the canvas
@@ -75,19 +66,13 @@ export function CanvasShell({ notebook, chapter }: { notebook: Notebook; chapter
     activePageIndex,
     error,
     handleMount,
-    createTopic,
-    selectTopic,
     applyFitMode,
     refit,
     goToSheet,
     addSheet,
-    renameTopic,
-    duplicateTopic,
-    deleteTopic,
     getEditor,
   } = useChapterCanvas(chapter, paddingRef, deeplink, insetRef);
 
-  const canDeleteTopic = topics.length > 1;
   const isPageChapter = chapter.canvas_type === 'page';
   const activeTopic = topics.find((t) => t.id === activeTopicId) ?? null;
 
@@ -103,6 +88,58 @@ export function CanvasShell({ notebook, chapter }: { notebook: Notebook; chapter
     refit,
   });
   const ui = useCanvasUi({ isPageChapter, applyFitMode });
+  const iconsOpen = useIconFinderStore((s) => s.open);
+
+  // dropping icon-finder results on the canvas: capture-phase listeners on
+  // the canvas area so they run before tldraw's own drop handling and keep
+  // external text drops (table paste etc.) untouched
+  useEffect(() => {
+    const el = pageView.canvasAreaRef.current;
+    if (!el) return;
+    const hasIcon = (e: DragEvent) => !!e.dataTransfer?.types.includes('application/x-oort-icon');
+    const over = (e: DragEvent) => {
+      if (!hasIcon(e) || !e.dataTransfer) return;
+      e.preventDefault();
+      e.stopPropagation();
+      e.dataTransfer.dropEffect = 'copy';
+    };
+    const drop = (e: DragEvent) => {
+      const id = e.dataTransfer?.getData('application/x-oort-icon');
+      if (!id) return;
+      const ed = getEditor();
+      // view mode hides every editing affordance, including this flow
+      if (!ed || pageView.viewMode) return;
+      e.preventDefault();
+      e.stopPropagation();
+      createIconShapeAt(ed, id, ed.screenToPage({ x: e.clientX, y: e.clientY }));
+    };
+    el.addEventListener('dragover', over, true);
+    el.addEventListener('drop', drop, true);
+    return () => {
+      el.removeEventListener('dragover', over, true);
+      el.removeEventListener('drop', drop, true);
+    };
+  }, [getEditor, pageView.viewMode]);
+
+  // the icon finder keyboard command: ctrl/cmd+alt+I toggles the dialog.
+  // Capture phase + stopPropagation so tldraw never sees the combo; typing
+  // contexts (cell editors, words, own dialog inputs) stay untouched, and
+  // "cmd+i" (no alt) keeps italic.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key.toLowerCase() !== 'i' || !(e.ctrlKey || e.metaKey) || !e.altKey) return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
+      const ed = getEditor();
+      if (!ed || pageView.viewMode || settingsOpen || ed.getEditingShapeId()) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const store = useIconFinderStore.getState();
+      store.setOpen(!store.open);
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [getEditor, pageView.viewMode, settingsOpen]);
 
   function handlePaddingChange(value: number) {
     const clamped = Math.min(Math.max(Math.round(value) || 0, 0), 200);
@@ -119,39 +156,13 @@ export function CanvasShell({ notebook, chapter }: { notebook: Notebook; chapter
     insetRef.current = clamped;
   }
 
-  function handleTopicAction(topic: Topic, action: TopicMenuAction) {
-    switch (action) {
-      case TOPIC_RENAME:
-        setRenaming(topic);
-        break;
-      case TOPIC_DUPLICATE:
-        duplicateTopic(topic);
-        break;
-      case TOPIC_DELETE:
-        setConfirmDelete(topic);
-        break;
-    }
-  }
-
   return (
     <>
-      {!pageView.viewMode && (
-        <CanvasSidebar
-          notebook={notebook}
-          topics={topics}
-          activeTopicId={activeTopicId}
-          canDeleteTopic={canDeleteTopic}
-          onSelectTopic={selectTopic}
-          onCreateTopic={createTopic}
-          onTopicAction={handleTopicAction}
-          onBack={() => navigate(`/notebooks/${notebook.id}`)}
-        />
-      )}
-
-      <SidebarInset className="bg-canvas">
+      <div className="flex h-dvh w-full flex-col overflow-hidden bg-canvas">
+        <IconFinder open={iconsOpen} onClose={() => useIconFinderStore.getState().setOpen(false)} />
         {!pageView.viewMode && (
           <CanvasTopBar
-            notebookName={notebook.name}
+            chapterName={chapter.name}
             pageMenuSlotRef={ui.pageMenuSlotRef}
             mainMenuSlotRef={ui.mainMenuSlotRef}
             pageControls={
@@ -175,6 +186,8 @@ export function CanvasShell({ notebook, chapter }: { notebook: Notebook; chapter
                 : null
             }
             onOpenSettings={() => setSettingsOpen((o) => !o)}
+            onBack={() => navigate(`/notebooks/${notebook.id}`)}
+            onOpenIcons={pageView.viewMode ? undefined : () => useIconFinderStore.getState().setOpen(true)}
           />
         )}
 
@@ -195,7 +208,7 @@ export function CanvasShell({ notebook, chapter }: { notebook: Notebook; chapter
               <ZoomSlotContext.Provider value={ui.zoomSlot}>
                 <Tldraw
                   tools={[ComponentsTool]}
-                  shapeUtils={[CodeBlockUtil, SvgDiagramUtil, MathBlockUtil, TableUtil, CalloutCardUtil]}
+                  shapeUtils={[CodeBlockUtil, SvgDiagramUtil, MathBlockUtil, TableUtil, CalloutCardUtil, IconUtil]}
                   textOptions={ui.textOptions}
                   onMount={(editor) => {
                     handleMount(editor);
@@ -238,30 +251,7 @@ export function CanvasShell({ notebook, chapter }: { notebook: Notebook; chapter
           />
 
         </div>
-      </SidebarInset>
-
-      {renaming && (
-        <TopicRenameDialog
-          topic={renaming}
-          onClose={() => setRenaming(null)}
-          onRename={async (name) => {
-            if (renaming) renameTopic(renaming, name);
-            setRenaming(null);
-          }}
-        />
-      )}
-
-      <ConfirmAlertDialog
-        open={confirmDelete !== null}
-        onOpenChange={(open) => !open && setConfirmDelete(null)}
-        title={`Delete "${confirmDelete?.name}"?`}
-        description="The topic's canvas page and everything on it is removed. This cannot be undone."
-        confirmLabel="Delete topic"
-        onConfirm={() => {
-          if (confirmDelete) deleteTopic(confirmDelete);
-          setConfirmDelete(null);
-        }}
-      />
+      </div>
     </>
   );
 }

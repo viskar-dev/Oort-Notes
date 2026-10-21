@@ -1,5 +1,4 @@
 import { useNavigate, useParams } from 'react-router-dom';
-import { SidebarProvider } from '@/components/ui/sidebar';
 import 'tldraw/tldraw.css';
 import { RouteError } from '@/pages/route-error';
 import { CanvasShell } from './CanvasShell';
@@ -27,11 +26,6 @@ export function CanvasPage() {
   if (!loaded) {
     return <div className="flex h-screen items-center justify-center text-muted-foreground">Loading…</div>;
   }
-  // the provider must wrap the shell: CanvasShell reads useSidebar to re-fit
-  // the sheets when the sidebar toggles
-  return (
-    <SidebarProvider>
-      <CanvasShell key={loaded.chapter.id} notebook={loaded.notebook} chapter={loaded.chapter} />
-    </SidebarProvider>
-  );
+  // the shell owns the full viewport: top bar + canvas
+  return <CanvasShell key={loaded.chapter.id} notebook={loaded.notebook} chapter={loaded.chapter} />;
 }

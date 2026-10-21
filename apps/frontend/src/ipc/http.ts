@@ -24,7 +24,7 @@ import type {
   RestoreResult,
 } from './transport';
 
-const BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:3000';
+export const BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:3000';
 
 async function get<T>(path: string): Promise<T> {
   const res = await fetch(`${BASE}${path}`);

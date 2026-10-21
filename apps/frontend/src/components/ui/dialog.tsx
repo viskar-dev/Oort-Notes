@@ -43,13 +43,17 @@ function DialogContent({
   className,
   children,
   showCloseButton = true,
+  overlay = true,
   ...props
 }: DialogPrimitive.Popup.Props & {
   showCloseButton?: boolean
+  /** render the dimmed backdrop; switch off for non-modal pickers that must
+   *  keep the page behind them interactive (drag & drop targets) */
+  overlay?: boolean
 }) {
   return (
     <DialogPortal>
-      <DialogOverlay />
+      {overlay && <DialogOverlay />}
       <DialogPrimitive.Popup
         data-slot="dialog-content"
         className={cn(

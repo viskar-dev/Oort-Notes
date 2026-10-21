@@ -10,6 +10,7 @@ use sqlx::SqlitePool;
 use tower_http::cors::{Any, CorsLayer};
 
 pub mod google;
+pub mod icons;
 
 pub type ApiResult<T> = Result<Json<T>, (StatusCode, String)>;
 
@@ -493,6 +494,7 @@ pub fn build_router(pool: SqlitePool) -> Router {
             get(load_ui_preset).patch(update_ui_preset).delete(delete_ui_preset),
         )
         .merge(google::routes())
+        .merge(icons::routes())
         .layer(cors)
         .with_state(pool)
 }
