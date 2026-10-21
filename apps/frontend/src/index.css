@@ -53,8 +53,9 @@ body {
 /* tldraw editor: purple selection/focus accent on top of its dark theme */
 
 /* floating toolbar as a full-radius pill: every wrapper layer rounds fully,
-   and the overflowing tool strip inherits the capsule so its ends match the
-   pill at any width */
+   and the tool strip inherits the capsule so its ends match the pill at any
+   width. The strip renders without tldraw's item-count overflow (the preset
+   bar carries 10+ items), so very narrow windows wrap to extra rows. */
 .oort-editor .tlui-toolbar,
 .oort-editor .tlui-toolbar__inner,
 .oort-editor .tlui-toolbar__tools,
@@ -64,6 +65,12 @@ body {
   border-radius: 9999px;
 }
 
+.oort-editor .tlui-toolbar__tools {
+  flex-wrap: wrap;
+  max-width: min(96vw, 1330px);
+  row-gap: 6px;
+}
+
 /* active tool button: circular highlight behind the icon (the ::after
    layer carries the active background; inset 4px on a 48px square = circle) */
 .oort-editor .tlui-toolbar .tlui-button__tool::after {
@@ -71,17 +78,10 @@ body {
 }
 
 /* canvas zoom inside the same pill: hairline divider, then the zoom readout
-   ("100%") which opens tldraw's zoom menu. The tool strip hides the tail of
-   its list on narrow windows and re-renders the children in the "more"
-   popover grid, so the zoom block is pinned visible in the strip and hidden
-   from that popover. */
-.oort-editor .tlui-toolbar__tools__list > .oort-toolbar__zoom {
-  display: flex !important;
+   ("100%") which opens tldraw's zoom menu. */
+.oort-editor .tlui-toolbar__tools > .oort-toolbar__zoom {
+  display: flex;
   align-items: center;
-}
-
-.oort-editor .tlui-buttons__grid .oort-toolbar__zoom {
-  display: none !important;
 }
 
 .oort-editor .oort-toolbar__zoom-divider {
