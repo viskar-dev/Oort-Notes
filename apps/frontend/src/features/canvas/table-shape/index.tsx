@@ -82,18 +82,18 @@ const TABLE_CSS = `
 .tl-table tbody td:first-child{color:var(--tbl-label)}
 .tl-table tbody td:not(:first-child){color:var(--tbl-value);font-weight:600}
 .tl-table td.is-active,.tl-table th.is-active{box-shadow:inset 0 0 0 1px var(--tbl-accent)}
-/* row/column selection: hover crosshair tint, stronger tint for the selected
-   row/column, and slim accent handles on the edges to click-select them */
+/* row/column select: tiny accent ticks on the edges — visible only on the
+   hovered row/column (subtle) and the selected one (full, steady). They sit
+   just inside the border because tldraw's 9px selection-resize strips
+   (pointer-events:all, x -4.5..4.5) otherwise swallow the clicks */
 .tl-table th,.tl-table td{position:relative}
-.tl-table td.is-hov,.tl-table th.is-hov{background:color-mix(in srgb,var(--tbl-head) 14%,transparent)}
-.tl-table td.is-sel,.tl-table th.is-sel{background:color-mix(in srgb,var(--tbl-accent) 18%,transparent)}
-.rc-handle{position:absolute;z-index:2;display:block;background:var(--tbl-accent);border-radius:3px;opacity:0;transition:opacity .12s;cursor:pointer}
-.tl-table:hover .rc-handle{opacity:.4}
-.rc-handle:hover,.rc-handle.is-on{opacity:1}
-/* placed 6px inside so tldraw's 9px selection-resize strips (pointer-events
-   all, x -4.5..4.5) don't swallow their clicks */
-.rc-row-handle{left:6px;top:6px;width:5px;height:calc(100% - 12px)}
-.rc-col-handle{top:6px;left:6px;height:5px;width:calc(100% - 12px)}
+.rc-handle{position:absolute;z-index:2;cursor:pointer;background:transparent;opacity:0;transition:opacity .08s linear}
+.rc-row-handle{left:0;top:calc(50% - 11px);width:12px;height:22px}
+.rc-row-handle::before{content:'';position:absolute;left:5px;top:3px;width:3px;height:16px;border-radius:2px;background:var(--tbl-accent)}
+.rc-col-handle{top:0;left:calc(50% - 11px);width:22px;height:12px}
+.rc-col-handle::before{content:'';position:absolute;top:5px;left:3px;width:16px;height:3px;border-radius:2px;background:var(--tbl-accent)}
+.rc-handle.is-hov{opacity:.6}
+.rc-handle.is-sel{opacity:1}
 /* lists inside cells: Tailwind's preflight strips list-style/padding, so the
    static cell (and the ProseMirror overlay on top of it) needs it back in
    order to look like a real list instead of plain text */
@@ -611,19 +611,10 @@ function TableView({ shape }: { shape: TableShape }) {
         {row.map((richText, c) => {
           const isActive = isEditing && active?.row === r && active.col === c;
           const align = rowOverride ?? (aligns[c] ?? 'start');
-          const cls =
-            [
-              isActive && 'is-active',
-              hover && (hover.row === r || hover.col === c) && 'is-hov',
-              sel?.kind === 'row' && sel.index === r && 'is-sel',
-              sel?.kind === 'col' && sel.index === c && 'is-sel',
-            ]
-              .filter(Boolean)
-              .join(' ') || undefined;
           return (
             <Cell
               key={c}
-              className={cls}
+              className={isActive ? 'is-active' : undefined}
               style={{ textAlign: cssAlign(align) }}
               onPointerDown={(e) => {
                 lastPressed.set({ id: shape.id, row: r, col: c });
@@ -635,7 +626,9 @@ function TableView({ shape }: { shape: TableShape }) {
                   open(r, c);
                 }
               }}
-              onMouseEnter={() => hoverRC.set({ id: shape.id, row: r, col: c })}
+              onMouseEnter={() => {
+                if (!isEditing) hoverRC.set({ id: shape.id, row: r, col: c });
+              }}
               onMouseLeave={() => {
                 const hv = hoverRC.get();
                 if (hv && hv.id === shape.id) hoverRC.set(null);
@@ -648,23 +641,30 @@ function TableView({ shape }: { shape: TableShape }) {
                 <StaticCell richText={richText} hidden={isActive} />
                 {isActive && renderEditor(r, c)}
               </div>
-              {/* edge handles: click to select the whole row / column */}
+              {/* edge ticks: click to select the whole row / column — only the
+                  hovered row/column (and the selected one) shows its tick */}
               {c === 0 && (
                 <span
-                  className={`rc-handle rc-row-handle${sel?.kind === 'row' && sel.index === r ? ' is-on' : ''}`}
+                  className={
+                    'rc-handle rc-row-handle' +
+                    (hover?.row === r ? ' is-hov' : '') +
+                    (sel?.kind === 'row' && sel.index === r ? ' is-sel' : '')
+                  }
                   data-testid={`table.row-handle-${r}`}
                   title="Click to select this row"
                   onPointerDown={toggleSel('row', r)}
-                  onMouseEnter={() => hoverRC.set({ id: shape.id, row: r, col: null })}
                 />
               )}
               {r === 0 && (
                 <span
-                  className={`rc-handle rc-col-handle${sel?.kind === 'col' && sel.index === c ? ' is-on' : ''}`}
+                  className={
+                    'rc-handle rc-col-handle' +
+                    (hover?.col === c ? ' is-hov' : '') +
+                    (sel?.kind === 'col' && sel.index === c ? ' is-sel' : '')
+                  }
                   data-testid={`table.col-handle-${c}`}
                   title="Click to select this column"
                   onPointerDown={toggleSel('col', c)}
-                  onMouseEnter={() => hoverRC.set({ id: shape.id, row: null, col: c })}
                 />
               )}
             </Cell>
