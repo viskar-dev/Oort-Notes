@@ -43,6 +43,11 @@ type TableProps = {
    * entries are only materialized once a row alignment is set ('auto' elsewhere)
    */
   rowAlign?: RowAlign[];
+  /**
+   * column widths as fractions of the shape width (sum ≈ 1, one per column);
+   * materialized once a boundary is dragged, equal split before that
+   */
+  colWidths?: number[];
 };
 
 export type TableShape = TLBaseShape<'table', TableProps>;
@@ -97,10 +102,18 @@ const TABLE_CSS = `
 .rc-handle.is-hov{opacity:.55}
 .rc-handle.is-sel{opacity:1}
 .rc-handle.is-sel::before{box-shadow:0 0 0 2.5px color-mix(in srgb,var(--tbl-accent) 30%,transparent)}
+/* column-width drag handles: invisible full-height strips straddling each
+   internal column boundary (rendered only while the shape is selected and no
+   cell editor is open); hovering (or dragging) reveals a thin accent line.
+   They live inside the first-row cells, so nothing clips them */
+.col-resizer{position:absolute;left:-5px;top:-1px;width:10px;cursor:col-resize;z-index:3;background:transparent}
+.col-resizer::before{content:'';position:absolute;left:4px;top:10px;bottom:10px;width:2px;border-radius:1px;background:var(--tbl-accent);opacity:0;transition:opacity .08s linear}
+.col-resizer:hover::before,.col-resizer[data-drag]::before{opacity:.8}
 /* lists inside cells: Tailwind's preflight strips list-style/padding, so the
    static cell (and the ProseMirror overlay on top of it) needs it back in
-   order to look like a real list instead of plain text */
-.tl-table-cell ul,.tl-table-cell ol{margin:.2em 0;padding-left:1.4em;text-align:start}
+   order to look like a real list instead of plain text. No text-align here:
+   the alignment must inherit from the cell so row/col alignment applies */
+.tl-table-cell ul,.tl-table-cell ol{margin:.2em 0;padding-left:1.4em}
 .tl-table-cell ul{list-style:disc}
 .tl-table-cell ul ul{list-style:circle}
 .tl-table-cell ul ul ul{list-style:square}
@@ -108,7 +121,7 @@ const TABLE_CSS = `
 .tl-table-cell ol ol{list-style:lower-alpha}
 .tl-table-cell ol ol ol{list-style:lower-roman}
 .tl-table-cell li p{margin:0}
-.tl-table-cell-wrap .ProseMirror ul,.tl-table-cell-wrap .ProseMirror ol{margin:.2em 0;padding-left:1.4em;text-align:start}
+.tl-table-cell-wrap .ProseMirror ul,.tl-table-cell-wrap .ProseMirror ol{margin:.2em 0;padding-left:1.4em}
 .tl-table-cell-wrap .ProseMirror ul{list-style:disc}
 .tl-table-cell-wrap .ProseMirror ul ul{list-style:circle}
 .tl-table-cell-wrap .ProseMirror ol{list-style:decimal}
@@ -116,6 +129,15 @@ const TABLE_CSS = `
 .tl-table-cell p{margin:0}
 .tl-table-cell-wrap{position:relative;min-height:1.5em}
 .tl-table-cell-wrap .ProseMirror{outline:none;user-select:text;white-space:pre-wrap;margin:0}
+/* inline marks: tldraw styles them only under .tl-rich-text (the editing
+   overlay has that class; the static cell does not), so mirror the ones
+   that need them — bold must beat the mono-weight cells, and inline code
+   would otherwise be indistinguishable from already-monospace text */
+.tl-table-cell strong,.tl-table-cell b{font-weight:700}
+.tl-table-cell code{border-radius:2px;padding:0 2px;background:color-mix(in srgb,#fddd00 38%,transparent)}
+.tl-table-cell a{color:var(--color-primary);text-decoration:underline}
+.tl-table-cell mark{background-color:#fddd00;border-radius:2px}
+.tl-table-cell-wrap .ProseMirror code{border-radius:2px;padding:0 2px;background:color-mix(in srgb,#fddd00 38%,transparent)}
 `;
 
 let stylesInjected = false;
@@ -190,21 +212,40 @@ export function tableOps(editor: Editor, id: TLShapeId) {
           : {},
       ),
     addCol: () =>
-      updateTable(editor, id, (p) => ({
-        cells: p.cells.map((row) => [...row, toRichText('')]),
-        headerAlign: [...p.headerAlign, 'start'],
-        bodyAlign: [...p.bodyAlign, 'start'],
-      })),
+      updateTable(editor, id, (p) => {
+        // a dragged table splits its last column so the new one fits in
+        const fr =
+          p.colWidths && p.colWidths.length === colCount(p)
+            ? (() => {
+                const last = p.colWidths![colCount(p) - 1];
+                return [...p.colWidths!.slice(0, -1), last / 2, last / 2];
+              })()
+            : undefined;
+        return {
+          cells: p.cells.map((row) => [...row, toRichText('')]),
+          headerAlign: [...p.headerAlign, 'start'],
+          bodyAlign: [...p.bodyAlign, 'start'],
+          ...(fr ? { colWidths: fr } : {}),
+        };
+      }),
     removeCol: () =>
-      updateTable(editor, id, (p) =>
-        colCount(p) > 1
-          ? {
-              cells: p.cells.map((row) => row.slice(0, -1)),
-              headerAlign: p.headerAlign.slice(0, -1),
-              bodyAlign: p.bodyAlign.slice(0, -1),
-            }
-          : {},
-      ),
+      updateTable(editor, id, (p) => {
+        const cols = colCount(p);
+        if (cols > 1) {
+          // dropping the last column folds its width into the new last column
+          const fr =
+            p.colWidths && p.colWidths.length === cols
+              ? [...p.colWidths.slice(0, cols - 2), p.colWidths[cols - 2] + p.colWidths[cols - 1]]
+              : undefined;
+          return {
+            cells: p.cells.map((row) => row.slice(0, -1)),
+            headerAlign: p.headerAlign.slice(0, -1),
+            bodyAlign: p.bodyAlign.slice(0, -1),
+            ...(fr ? { colWidths: fr } : {}),
+          };
+        }
+        return {};
+      }),
     toggleHeader: () => updateTable(editor, id, (p) => ({ hasHeader: !p.hasHeader })),
     setAlign: (kind: 'headerAlign' | 'bodyAlign', col: number, value: TableAlign) =>
       updateTable(editor, id, (p) => {
@@ -473,11 +514,19 @@ function TableView({ shape }: { shape: TableShape }) {
   const editor = useEditor();
   ensureStyles();
 
-  const { w, h, cells, hasHeader, headerAlign, bodyAlign, rowAlign } = shape.props;
+  const { w, h, cells, hasHeader, headerAlign, bodyAlign, rowAlign, colWidths } = shape.props;
   const rows = cells.length;
   const cols = cells[0]?.length ?? 1;
   const ops = useMemo(() => tableOps(editor, shape.id), [editor, shape.id]);
   const innerRef = useRef<HTMLDivElement>(null);
+  // column widths: stored fractions renormalized for float drift; equal split
+  // until a boundary is dragged; the last column also absorbs sum error
+  const fracs = useMemo(() => {
+    if (!colWidths || colWidths.length !== cols) return Array.from({ length: cols }, () => 1 / cols);
+    const f = colWidths.slice();
+    const sum = f.reduce((a, b) => a + b, 0);
+    return sum > 0.01 ? f.map((v) => v / sum) : Array.from({ length: cols }, () => 1 / cols);
+  }, [colWidths, cols]);
 
   const isDark = useValue('table dark', () => editor.user.getIsDarkMode(), [editor]);
   const isEditing = useValue('table editing', () => editor.getEditingShapeId() === shape.id, [editor, shape.id]);
@@ -558,6 +607,52 @@ function TableView({ shape }: { shape: TableShape }) {
 
   const open = (row: number, col: number) => activeCell.set({ id: shape.id, row, col });
 
+  // column width drag: the boundary between two columns moves live; widths are
+  // stored as fractions of the shape width (history-ignored during the drag)
+  const startColResize = (c: number) => (e: React.PointerEvent<HTMLSpanElement>) => {
+    if (editor.getIsReadonly()) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const el = e.currentTarget;
+    el.setPointerCapture(e.pointerId);
+    const startX = e.clientX;
+    const zoom = editor.getZoomLevel();
+    const cur = editor.getShape<TableShape>(shape.id);
+    if (!cur) return;
+    const n = cur.props.cells[0]?.length ?? 1;
+    const base =
+      cur.props.colWidths && cur.props.colWidths.length === n
+        ? cur.props.colWidths.slice()
+        : Array.from({ length: n }, () => 1 / n);
+    // one round: ~56px page-space minimum per column
+    const minFrac = Math.max(0.05, 56 / Math.max(cur.props.w, 1));
+    const a0 = base[c - 1];
+    const b0 = base[c];
+    // clamp so neither side drops below the minimum width
+    const lo = minFrac - a0;
+    const hi = b0 - minFrac;
+    const onMove = (ev: PointerEvent) => {
+      const d = Math.min(Math.max((ev.clientX - startX) / zoom / cur.props.w, lo), hi);
+      el.dataset.drag = '1';
+      const next = base.slice();
+      next[c - 1] = Math.round((a0 + d) * 10000) / 10000;
+      next[c] = Math.round((b0 - d) * 10000) / 10000;
+      editor.run(
+        () => editor.updateShape<TableShape>({ id: shape.id, type: 'table', props: { colWidths: next } }),
+        { history: 'ignore' },
+      );
+    };
+    const onUp = () => {
+      delete el.dataset.drag;
+      el.removeEventListener('pointermove', onMove);
+      el.removeEventListener('pointerup', onUp);
+      el.removeEventListener('pointercancel', onUp);
+    };
+    el.addEventListener('pointermove', onMove);
+    el.addEventListener('pointerup', onUp);
+    el.addEventListener('pointercancel', onUp);
+  };
+
   function renderEditor(row: number, col: number) {
     return (
       <RichTextArea
@@ -580,12 +675,17 @@ function TableView({ shape }: { shape: TableShape }) {
         }}
         handleKeyDown={(e) => {
           if (e.key === 'Escape' || (e.key === 'Enter' && (e.ctrlKey || e.metaKey))) {
+            // keep the key off tldraw's select tool: Escape must end cell
+            // editing without deselecting the whole table (its idle state
+            // would otherwise cancel the selection on the same keydown)
             e.preventDefault();
+            e.stopPropagation();
             editor.setEditingShape(null);
             return;
           }
           if (e.key === 'Tab') {
             e.preventDefault();
+            e.stopPropagation();
             const flat = row * cols + col + (e.shiftKey ? -1 : 1);
             if (flat < 0) return;
             if (flat >= rows * cols) ops.addRow(); // Tab out of the last cell adds a row
@@ -671,6 +771,15 @@ function TableView({ shape }: { shape: TableShape }) {
                   onPointerDown={toggleSel('col', c)}
                 />
               )}
+              {/* column-width drag strips on the internal boundaries */}
+              {selected && !isEditing && r === 0 && c > 0 && (
+                <span
+                  className="col-resizer"
+                  data-testid={`table.col-resizer-${c}`}
+                  style={{ height: h }}
+                  onPointerDown={startColResize(c)}
+                />
+              )}
             </Cell>
           );
         })}
@@ -682,13 +791,17 @@ function TableView({ shape }: { shape: TableShape }) {
   const bodyRows = hasHeader ? cells.slice(1) : cells;
 
   return (
-    <HTMLContainer className="tl-table-shape" style={{ ...vars, width: w, height: h, pointerEvents: 'all' }}>
+    <HTMLContainer
+      className="tl-table-shape"
+      style={{ ...vars, width: w, height: h, pointerEvents: 'all' }}
+      data-table-id={shape.id}
+    >
       <div className="tl-table-card" style={{ width: w, height: h }}>
         <div ref={innerRef}>
           <table className="tl-table">
             <colgroup>
               {Array.from({ length: cols }, (_, i) => (
-                <col key={i} style={{ width: `${100 / cols}%` }} />
+                <col key={i} style={{ width: `${fracs[i] * 100}%` }} />
               ))}
             </colgroup>
             {hasHeader && <thead>{renderRow(cells[0], 0, true)}</thead>}
@@ -716,6 +829,7 @@ export class TableUtil extends BaseBoxShapeUtil<TableShape> {
     headerAlign: T.arrayOf(alignProp),
     bodyAlign: T.arrayOf(alignProp),
     rowAlign: rowAlignProp,
+    colWidths: T.arrayOf(T.number).optional(),
   };
 
   override canEdit(): boolean {

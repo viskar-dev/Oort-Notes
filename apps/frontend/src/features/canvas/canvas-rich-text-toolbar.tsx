@@ -2,10 +2,11 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Editor as TiptapEditor } from '@tiptap/core';
 import {
   preventDefault,
-  DefaultRichTextToolbar,
+  Box,
   DefaultRichTextToolbarContent,
   TldrawUiButton,
   TldrawUiButtonIcon,
+  TldrawUiContextualToolbar,
   TldrawUiInput,
   TldrawUiToolbarButton,
   track,
@@ -204,23 +205,53 @@ function LinkEditor({
 }
 
 /**
+ * Keeps `isMousingDown` true while the pointer is pressed inside the open rich
+ * text editor (a local copy of tldraw's useIsMousingDownOnTextEditor — not
+ * exported): without it the bar flickers out while selection-dragging.
+ */
+function useIsMousingDownOnTextEditor(textEditor: TiptapEditor | null | undefined) {
+  const [isMousingDown, setIsMousingDown] = useState(false);
+  useEffect(() => {
+    if (!textEditor || textEditor.isDestroyed) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const flip = (pointing: boolean) => {
+      clearTimeout(timer);
+      timer = setTimeout(() => setIsMousingDown(pointing), 16);
+    };
+    const down = () => flip(true);
+    const up = () => flip(false);
+    const downEvents = ['touchstart', 'pointerdown', 'mousedown'];
+    const upEvents = ['touchend', 'pointerup', 'mouseup'];
+    downEvents.forEach((ev) => textEditor.view.dom.addEventListener(ev, down));
+    upEvents.forEach((ev) => document.body.addEventListener(ev, up));
+    return () => {
+      clearTimeout(timer);
+      downEvents.forEach((ev) => textEditor.view.dom.removeEventListener(ev, down));
+      upEvents.forEach((ev) => document.body.removeEventListener(ev, up));
+    };
+  }, [textEditor]);
+  return isMousingDown;
+}
+
+/**
  * Rich text toolbar (components.RichTextToolbar).
  *
  * The "content edit" bar: shows whenever the rich text editor is open.
  * While a selection is active (a word or select-all) it carries the word
  * colour menu as well, and the contextual style panel (the element/main
  * option bar) steps aside so only this bar shows. With a collapsed caret
- * the colour menu hides and the main panel shows above the shape.
+ * the colour menu hides. see getSelectionBounds for caret positioning.
  *
- * The stock bold/italic/code/list buttons and selection positioning come
- * from DefaultRichTextToolbar(Content). Link editing is the floating editor
+ * The stock bold/italic/code/list buttons come from
+ * DefaultRichTextToolbar(Content). Link editing is the floating editor
  * above: it is kept out of the toolbar row so the row never resizes while
  * the input holds focus (resizing lets tldraw re-read the — by then
- * collapsed — window selection and hide the toolbar). tldraw only provides
- * its own inline editor when no custom children are passed.
+ * collapsed — window selection and hide the toolbar).
  *
- * No separators between the groups: hand-rolled divider elements paint
- * stray vertical strokes outside the button grid (the "corner lines").
+ * Positioning is forked from tldraw's ContextualToolbarInner: a collapsed
+ * caret in an open TABLE cell anchors the bar above that cell (so
+ * bold-then-type works), which tldraw's own version only ever does for a
+ * non-collapsed window selection.
  */
 export const CanvasRichTextToolbar = track(function CanvasRichTextToolbar() {
   const editor = useEditor();
@@ -231,6 +262,28 @@ export const CanvasRichTextToolbar = track(function CanvasRichTextToolbar() {
 
   const [editingLink, setEditingLink] = useState(false);
   const linkTriggerRef = useRef<HTMLButtonElement | null>(null);
+  // tiptap selection state: re-runs the position effect when a word is picked
+  // or the caret collapses
+  const [currentSelection, setCurrentSelection] = useState<unknown>(null);
+  useEffect(() => {
+    if (!textEditor || textEditor.isDestroyed) return;
+    const handleSelectionUpdate = ({ editor: tiptap }: { editor: TiptapEditor }) =>
+      setCurrentSelection(tiptap.state.selection);
+    textEditor.on('selectionUpdate', handleSelectionUpdate);
+    handleSelectionUpdate({ editor: textEditor });
+    return () => {
+      textEditor.off('selectionUpdate', handleSelectionUpdate);
+    };
+  }, [textEditor]);
+  // last non-collapsed selection box; keeps the bar fixed while the link
+  // input holds focus (the window selection collapses the moment inputs focus)
+  const previousSelectionBounds = useRef<Box | null>(null);
+  const isMousingDown = useIsMousingDownOnTextEditor(textEditor);
+
+  // the open shape decides caret positioning: table cells get a cell anchor
+  const editingId = useValue('rich text editing shape', () => editor.getEditingShapeId(), [editor]);
+  const editingTableCell = !!editingId && editor.getShape(editingId)?.type === 'table';
+
   useEffect(() => {
     if (!textEditor || textEditor.isDestroyed) setEditingLink(false);
   }, [textEditor]);
@@ -250,10 +303,39 @@ export const CanvasRichTextToolbar = track(function CanvasRichTextToolbar() {
     if (live && !live.isDestroyed) live.chain().focus().run();
   }, [editor]);
 
-  if (!textEditor) return null;
+  // word-selected → anchor to the selection; caret-only → anchor above the
+  // open table cell (undefined elsewhere: text shapes keep tldraw's caret
+  // behavior, where the element panel shows instead)
+  const getSelectionBounds = useCallback((): Box | undefined => {
+    if (editingLink) return previousSelectionBounds.current ?? undefined;
+    if (currentSelection) {
+      const selection = window.getSelection();
+      if (selection && selection.rangeCount > 0 && !selection.isCollapsed) {
+        const rangeBoxes: Box[] = [];
+        for (let i = 0; i < selection.rangeCount; i++) {
+          const r = selection.getRangeAt(i).getBoundingClientRect();
+          rangeBoxes.push(new Box(r.x, r.y, r.width, r.height));
+        }
+        if (rangeBoxes.length > 0) {
+          const bounds = Box.Common(rangeBoxes);
+          previousSelectionBounds.current = bounds;
+          return bounds;
+        }
+      }
+    }
+    if (editingTableCell) {
+      const cell = document.querySelector(`[data-table-id="${editingId}"] .is-active`);
+      if (cell) {
+        const r = cell.getBoundingClientRect();
+        // zero height keeps the bar above the cell's top edge
+        return new Box(r.x, r.y, r.width, 0);
+      }
+    }
+    return undefined;
+  }, [editingLink, currentSelection, editingTableCell, editingId]);
 
-  // any active text selection (word or select-all) is "content" context:
-  // this bar owns the screen and the colour menu shows
+  if (!textEditor || editor.getInstanceState().isCoarsePointer) return null;
+
   const hasSelection = hasActiveTextSelection(textEditor);
   const swatches: SwatchItem[] = ALL_COLORS.filter((id) => !presetColors?.hidden?.includes(id)).map((id) => ({
     id,
@@ -261,7 +343,13 @@ export const CanvasRichTextToolbar = track(function CanvasRichTextToolbar() {
   }));
 
   return (
-    <DefaultRichTextToolbar>
+    <TldrawUiContextualToolbar
+      className="tlui-rich-text__toolbar"
+      getSelectionBounds={getSelectionBounds}
+      isMousingDown={isMousingDown}
+      changeOnlyWhenYChanges
+      label="Text formatting"
+    >
       {hasSelection && <WordColorMenu textEditor={textEditor} items={swatches} />}
       <TldrawUiToolbarButton
         ref={linkTriggerRef}
@@ -289,6 +377,6 @@ export const CanvasRichTextToolbar = track(function CanvasRichTextToolbar() {
           />
         </div>
       </FloatingPopover>
-    </DefaultRichTextToolbar>
+    </TldrawUiContextualToolbar>
   );
 });

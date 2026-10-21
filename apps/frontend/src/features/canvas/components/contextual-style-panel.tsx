@@ -958,6 +958,11 @@ export const ContextualStylePanel = track(() => {
     selectedShapes.length === 1 && selectedShapes[0].type === 'callout-card'
       ? (selectedShapes[0] as CalloutCardShape)
       : null;
+  // a cell editor is open on the selected table: the in-cell rich text
+  // toolbar (colour/link/bold/code/…) owns the screen — the element panel
+  // steps aside entirely instead of fighting it for space
+  const editingTableCell = !!onlyTable && editor.getEditingShapeId() === onlyTable.id;
+  if (editingTableCell) return null;
   // text-selection context (word or select-all): the main option bar steps
   // aside so only the content edit bar shows; table/card structure
   // groups are not string styling and stay put
