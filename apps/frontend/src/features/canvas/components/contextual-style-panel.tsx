@@ -16,12 +16,11 @@ import {
   FlipHorizontal2,
   FlipVertical2,
   Minimize2,
-  Minus,
   PanelTop,
-  Plus,
   StretchHorizontal,
   StretchVertical,
   Tag,
+  WandSparkles,
   type LucideIcon,
 } from 'lucide-react';
 import {
@@ -603,6 +602,58 @@ function AlignTrio({
   );
 }
 
+/** tiny stroke glyphs that read as "row/column +/−" at a glance — lucide has no
+ *  insert/remove row/column pair, so these mirror its stroke style (24-box,
+ *  width 2, round caps): bars = the axis, ⊕/⊖ badge bottom-right = the op */
+function StructureGlyph({ op }: { op: 'add-row' | 'remove-row' | 'add-col' | 'remove-col' }) {
+  const isRow = op.endsWith('row');
+  const add = op.startsWith('add');
+  return (
+    <svg
+      className="h-4 w-4"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      {isRow ? (
+        <>
+          <path d="M3 6h13" />
+          <path d="M3 12h13" />
+          <path d="M3 18h13" />
+        </>
+      ) : (
+        <>
+          <path d="M6 3v13" />
+          <path d="M12 3v13" />
+          <path d="M18 3v13" />
+        </>
+      )}
+      {add ? <path d="M20 17v6M17 20h6" /> : <path d="M17 20h6" />}
+    </svg>
+  );
+}
+
+/** icon-only contextual toolbar: uniform square buttons, no visible text
+ *  labels (all meaning moves to `title` tooltips) — mirrors the native
+ *  rich-text option bar look. Idempotent, injected once per page. */
+let panelStylesInjected = false;
+function ensurePanelStyles() {
+  if (panelStylesInjected || typeof document === 'undefined') return;
+  panelStylesInjected = true;
+  const el = document.createElement('style');
+  el.setAttribute('data-tl-table-panel', '');
+  el.textContent = `
+.tlui-contextual-toolbar .tlui-button{width:32px;height:32px;padding:0;display:inline-flex;align-items:center;justify-content:center}
+.tlui-contextual-toolbar .tlui-button svg{width:16px;height:16px;flex:none}
+.tlui-contextual-toolbar .tlui-button__label{display:none}
+`;
+  document.head.appendChild(el);
+}
+
 /** Table structure / header / alignment controls — shown when one table is selected. */
 function TableControlsGroup({ shape }: { shape: TableShape }) {
   const editor = useEditor();
@@ -626,13 +677,13 @@ function TableControlsGroup({ shape }: { shape: TableShape }) {
     editor.markHistoryStoppingPoint(label);
     fn();
   };
-  const targetLabel = !sel
-    ? 'All'
+  const targetTitle = !sel
+    ? 'Aligning whole table'
     : sel.kind === 'row'
       ? hasHeader && sel.index === 0
-        ? 'Header'
-        : `Row ${hasHeader ? sel.index : sel.index + 1}`
-      : `Col ${sel.index + 1}`;
+        ? 'Aligning header row'
+        : `Aligning row ${hasHeader ? sel.index : sel.index + 1}`
+      : `Aligning column ${sel.index + 1}`;
   // rows without an explicit override show no active alignment: they follow
   // their columns until one is picked here
   const currentAlign: TableAlign | null = !sel
@@ -664,7 +715,7 @@ function TableControlsGroup({ shape }: { shape: TableShape }) {
         onMouseDown={keepCellFocus}
         onClick={() => act('table add row', ops.addRow)}
       >
-        <Plus className="mr-1 h-3.5 w-3.5" />Row
+        <StructureGlyph op="add-row" />
       </TldrawUiButton>
       <TldrawUiButton
         type="low"
@@ -674,7 +725,7 @@ function TableControlsGroup({ shape }: { shape: TableShape }) {
         onMouseDown={keepCellFocus}
         onClick={() => act('table remove row', ops.removeRow)}
       >
-        <Minus className="mr-1 h-3.5 w-3.5" />Row
+        <StructureGlyph op="remove-row" />
       </TldrawUiButton>
       <TldrawUiButton
         type="low"
@@ -683,7 +734,7 @@ function TableControlsGroup({ shape }: { shape: TableShape }) {
         onMouseDown={keepCellFocus}
         onClick={() => act('table add col', ops.addCol)}
       >
-        <Plus className="mr-1 h-3.5 w-3.5" />Col
+        <StructureGlyph op="add-col" />
       </TldrawUiButton>
       <TldrawUiButton
         type="low"
@@ -693,7 +744,7 @@ function TableControlsGroup({ shape }: { shape: TableShape }) {
         onMouseDown={keepCellFocus}
         onClick={() => act('table remove col', ops.removeCol)}
       >
-        <Minus className="mr-1 h-3.5 w-3.5" />Col
+        <StructureGlyph op="remove-col" />
       </TldrawUiButton>
       <TldrawUiButton
         type="low"
@@ -706,10 +757,11 @@ function TableControlsGroup({ shape }: { shape: TableShape }) {
         <PanelTop className="h-3.5 w-3.5" />
       </TldrawUiButton>
 
-      <div className="flex items-center gap-1 pl-1" data-testid="style-picker.table.align-group">
-        <span className="text-[10px] font-semibold opacity-60" data-testid="style-picker.table.align-target">
-          {targetLabel}
-        </span>
+      <div
+        className="flex items-center gap-1"
+        data-testid="style-picker.table.align-group"
+        title={targetTitle}
+      >
         <AlignTrio current={currentAlign} testid="style-picker.table.align" onPick={applyAlign} />
         {sel?.kind === 'row' && (
           <TldrawUiButton
@@ -720,7 +772,7 @@ function TableControlsGroup({ shape }: { shape: TableShape }) {
             onMouseDown={keepCellFocus}
             onClick={() => act(`table row ${sel.index + 1} align auto`, () => ops.setRowAlign(sel.index, 'auto'))}
           >
-            <span className="text-[11px] font-semibold">Auto</span>
+            <WandSparkles className="h-4 w-4" />
           </TldrawUiButton>
         )}
       </div>
@@ -880,6 +932,8 @@ export const ContextualStylePanel = track(() => {
   // active swatch follows the text selection
   const textEditor = editor.getRichTextEditor();
   useRichTextTick(textEditor);
+  // icon-only uniform square buttons across the contextual toolbar (all groups)
+  useEffect(() => ensurePanelStyles(), []);
 
   const styles = editor.getSharedStyles();
   // view mode: no chrome, just the sheets
@@ -924,11 +978,14 @@ export const ContextualStylePanel = track(() => {
   const verticalAlign = styles.get(DefaultVerticalAlignStyle);
 
   // getSelectionBounds collapses the rotated bounds to zero height so the
-  // toolbar sits just above the top edge of the selection.
+  // toolbar sits just above the top edge of the selection. Tables float
+  // their column ticks in a ~18px band above that edge: lift the toolbar
+  // past the band so it never covers (and never swallows clicks on) them.
+  const onlyTableLift = onlyTable ? 24 : 0;
   const getSelectionBounds = () => {
     const bounds = editor.getSelectionRotatedScreenBounds();
     if (!bounds) return undefined;
-    return new Box(bounds.x, bounds.y, bounds.width, 0);
+    return new Box(bounds.x, bounds.y - onlyTableLift, bounds.width, 0);
   };
 
   return (

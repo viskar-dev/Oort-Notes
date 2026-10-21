@@ -73,7 +73,7 @@ export const selRC = atom<{ id: TLShapeId; kind: 'row' | 'col'; index: number } 
 // ================= styles =================
 
 const TABLE_CSS = `
-.tl-table-card{box-sizing:border-box;overflow:hidden;border:1px solid var(--tbl-border);border-radius:12px;background:var(--tbl-bg);box-shadow:var(--tbl-shadow);font-family:var(--tl-font-mono,ui-monospace,SFMono-Regular,Menlo,monospace)}
+.tl-table-card{box-sizing:border-box;overflow:visible;border:1px solid var(--tbl-border);border-radius:12px;background:var(--tbl-bg);box-shadow:var(--tbl-shadow);font-family:var(--tl-font-mono,ui-monospace,SFMono-Regular,Menlo,monospace)}
 .tl-table{width:100%;border-collapse:collapse;table-layout:fixed;border:0}
 .tl-table th,.tl-table td{padding:12px 20px;border:0;vertical-align:middle;overflow-wrap:anywhere}
 .tl-table thead th{padding-top:18px;padding-bottom:10px;font-size:11.5px;font-weight:500;letter-spacing:.06em;text-transform:uppercase;color:var(--tbl-head)}
@@ -82,18 +82,21 @@ const TABLE_CSS = `
 .tl-table tbody td:first-child{color:var(--tbl-label)}
 .tl-table tbody td:not(:first-child){color:var(--tbl-value);font-weight:600}
 .tl-table td.is-active,.tl-table th.is-active{box-shadow:inset 0 0 0 1px var(--tbl-accent)}
-/* row/column select: tiny accent ticks on the edges — visible only on the
-   hovered row/column (subtle) and the selected one (full, steady). They sit
-   just inside the border because tldraw's 9px selection-resize strips
-   (pointer-events:all, x -4.5..4.5) otherwise swallow the clicks */
+/* row/column select: tiny accent ticks floating just OUTSIDE the table —
+   visible only while the shape is selected, and only on the hovered
+   row/column (subtle) or the selected one (highlighted with a glow).
+   tldraw's 9px selection-resize strips (pointer-events:all at x/y
+   -4.5..4.5) hug the border, so the ticks are drawn beyond them; only the
+   card's border-radius/visible clip had to be relaxed for overhang */
 .tl-table th,.tl-table td{position:relative}
 .rc-handle{position:absolute;z-index:2;cursor:pointer;background:transparent;opacity:0;transition:opacity .08s linear}
-.rc-row-handle{left:0;top:calc(50% - 11px);width:12px;height:22px}
-.rc-row-handle::before{content:'';position:absolute;left:5px;top:3px;width:3px;height:16px;border-radius:2px;background:var(--tbl-accent)}
-.rc-col-handle{top:0;left:calc(50% - 11px);width:22px;height:12px}
-.rc-col-handle::before{content:'';position:absolute;top:5px;left:3px;width:16px;height:3px;border-radius:2px;background:var(--tbl-accent)}
-.rc-handle.is-hov{opacity:.6}
+.rc-row-handle{left:-18px;top:calc(50% - 11px);width:12px;height:22px}
+.rc-row-handle::before{content:'';position:absolute;left:3px;top:3px;width:3px;height:16px;border-radius:2px;background:var(--tbl-accent)}
+.rc-col-handle{top:-18px;left:calc(50% - 11px);width:22px;height:12px}
+.rc-col-handle::before{content:'';position:absolute;top:3px;left:3px;width:16px;height:3px;border-radius:2px;background:var(--tbl-accent)}
+.rc-handle.is-hov{opacity:.55}
 .rc-handle.is-sel{opacity:1}
+.rc-handle.is-sel::before{box-shadow:0 0 0 2.5px color-mix(in srgb,var(--tbl-accent) 30%,transparent)}
 /* lists inside cells: Tailwind's preflight strips list-style/padding, so the
    static cell (and the ProseMirror overlay on top of it) needs it back in
    order to look like a real list instead of plain text */
@@ -641,9 +644,10 @@ function TableView({ shape }: { shape: TableShape }) {
                 <StaticCell richText={richText} hidden={isActive} />
                 {isActive && renderEditor(r, c)}
               </div>
-              {/* edge ticks: click to select the whole row / column — only the
-                  hovered row/column (and the selected one) shows its tick */}
-              {c === 0 && (
+              {/* edge ticks: click to select the whole row / column — ticks only
+                  exist while the table is selected, and only the hovered
+                  row/column (and the selected one) shows its tick */}
+              {selected && c === 0 && (
                 <span
                   className={
                     'rc-handle rc-row-handle' +
@@ -655,7 +659,7 @@ function TableView({ shape }: { shape: TableShape }) {
                   onPointerDown={toggleSel('row', r)}
                 />
               )}
-              {r === 0 && (
+              {selected && r === 0 && (
                 <span
                   className={
                     'rc-handle rc-col-handle' +
