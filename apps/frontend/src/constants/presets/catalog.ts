@@ -10,6 +10,7 @@ export type ToolId =
   | 'shape'
   | 'line'
   | 'highlight'
+  | 'laser'
   | 'frame'
   | 'components';
 
@@ -43,6 +44,7 @@ export const TOOL_CATALOG: { id: ToolId; label: string }[] = [
   { id: 'shape', label: 'Shape' },
   { id: 'line', label: 'Line' },
   { id: 'highlight', label: 'Highlighter' },
+  { id: 'laser', label: 'Laser pointer' },
   { id: 'frame', label: 'Frame' },
   { id: 'components', label: 'Components' },
 ];

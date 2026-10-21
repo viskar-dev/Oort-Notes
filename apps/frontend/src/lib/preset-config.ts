@@ -11,7 +11,7 @@ export function defaultConfig(): PresetConfig {
   return {
     toolbar: TOOL_CATALOG.map((t) => ({
       id: t.id,
-      visible: !['line', 'highlight', 'frame'].includes(t.id),
+      visible: !['line', 'highlight', 'laser', 'frame'].includes(t.id),
     })),
     colors: { hidden: [], overrides: {} },
     fonts: { default: 'draw' },

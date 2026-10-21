@@ -10,6 +10,7 @@ import {
   Minus,
   MousePointer2,
   Pencil,
+  RadioTower,
   Square,
   StickyNote,
   Type,
@@ -30,6 +31,7 @@ export const TOOL_ICONS: Record<ToolId, LucideIcon> = {
   shape: Square,
   line: Minus,
   highlight: Highlighter,
+  laser: RadioTower,
   frame: Frame,
   components: Blocks,
 };
