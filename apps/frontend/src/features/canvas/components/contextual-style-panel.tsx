@@ -10,13 +10,19 @@ import {
   AlignStartHorizontal,
   AlignStartVertical,
   AlignVerticalDistributeCenter,
+  Check,
+  ChevronsUpDown,
+  Code as CodeIcon,
+  Copy,
   Droplet,
   Eye,
   EyeOff,
   FlipHorizontal2,
   FlipVertical2,
   Minimize2,
+  PencilLine,
   PanelTop,
+  Sigma,
   StretchHorizontal,
   StretchVertical,
   Tag,
@@ -71,6 +77,9 @@ import {
   type CalloutCardShape,
   type CalloutVariant,
 } from '@/features/canvas/card';
+import { CODE_LANGUAGES, type CodeBlockShape } from '@/features/canvas/code-block/code-block-shape';
+import type { SvgDiagramShape } from '@/features/canvas/svg-diagram/svg-diagram-shape';
+import type { MathBlockShape } from '@/features/canvas/math-extension/math-block-shape';
 
 // Static value/icon lists matching what the docked panel offers on tldraw
 // 3.15 (where the example's getColorStyleItems/getFontStyleItems helpers and
@@ -913,6 +922,187 @@ function CardControlsGroup({ shape }: { shape: CalloutCardShape }) {
   );
 }
 
+// ================= code / diagram / equation groups =================
+
+/** Human label for a code-block language option (C++ / Plain text). */
+function langLabel(lang: string): string {
+  return lang === 'cpp' ? 'C++' : lang === 'plain' ? 'Plain text' : lang;
+}
+
+/** Code block: language / font size / copy / fit — the floating mirror of the
+ * shape's own header, so the controls live where the panel always sits. */
+function CodeBlockControlsGroup({ shape }: { shape: CodeBlockShape }) {
+  const editor = useEditor();
+  const { code, language, fontSize, autoHeight } = shape.props;
+  const [langOpen, setLangOpen] = useState(false);
+  const [sizeOpen, setSizeOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const textSizes = [11, 12, 13, 14, 16, 18, 20];
+
+  const act = (label: string, props: Partial<CodeBlockShape['props']>) => {
+    editor.markHistoryStoppingPoint(label);
+    editor.run(() => editor.updateShape({ id: shape.id, type: 'code-block', props }));
+  };
+  const closePop = (id: string, setOpen: (open: boolean) => void) => {
+    tlmenus.deleteOpenMenu(id, editor.contextId);
+    setOpen(false);
+  };
+  const copy = () => {
+    navigator.clipboard?.writeText(code).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
+  };
+
+  return (
+    <>
+      <TldrawUiPopover id="contextual code language" open={langOpen} onOpenChange={setLangOpen}>
+        <TldrawUiPopoverTrigger>
+          <TldrawUiToolbarButton
+            type="icon"
+            title={`Language: ${langLabel(language)}`}
+            data-testid="style-picker.code.language"
+            onMouseDown={keepCellFocus}
+          >
+            <CodeIcon className="h-4 w-4" />
+          </TldrawUiToolbarButton>
+        </TldrawUiPopoverTrigger>
+        <TldrawUiPopoverContent side="bottom" align="center" sideOffset={8}>
+          <div
+            className="tlui-menu grid gap-1 overflow-y-auto p-1"
+            style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', maxHeight: 240 }}
+          >
+            {CODE_LANGUAGES.map((lang) => (
+              <TldrawUiButton
+                key={lang}
+                type="low"
+                title={langLabel(lang)}
+                data-testid={`style-picker.code.language.${lang}`}
+                isActive={language === lang}
+                onMouseDown={keepCellFocus}
+                onClick={() => {
+                  act('code language', { language: lang });
+                  closePop('contextual code language', setLangOpen);
+                }}
+              >
+                {langLabel(lang)}
+              </TldrawUiButton>
+            ))}
+          </div>
+        </TldrawUiPopoverContent>
+      </TldrawUiPopover>
+
+      <TldrawUiPopover id="contextual code size" open={sizeOpen} onOpenChange={setSizeOpen}>
+        <TldrawUiPopoverTrigger>
+          <TldrawUiToolbarButton
+            type="icon"
+            title={`Code font size: ${fontSize}px`}
+            data-testid="style-picker.code.size"
+            onMouseDown={keepCellFocus}
+          >
+            <span className="font-semibold leading-none" style={{ fontSize: 11 }}>
+              {fontSize}px
+            </span>
+          </TldrawUiToolbarButton>
+        </TldrawUiPopoverTrigger>
+        <TldrawUiPopoverContent side="bottom" align="center" sideOffset={8}>
+          <div className="tlui-menu grid grid-cols-4 gap-1 p-1" style={{ display: 'grid' }}>
+            {textSizes.map((px) => (
+              <TldrawUiToolbarButton
+                key={px}
+                type="icon"
+                title={`${px}px`}
+                data-testid={`style-picker.code.size.${px}`}
+                isActive={fontSize === px}
+                onMouseDown={keepCellFocus}
+                onClick={() => {
+                  act('code font size', { fontSize: px });
+                  closePop('contextual code size', setSizeOpen);
+                }}
+              >
+                <span className="font-semibold leading-none" style={{ fontSize: 11 }}>
+                  {px}px
+                </span>
+              </TldrawUiToolbarButton>
+            ))}
+          </div>
+        </TldrawUiPopoverContent>
+      </TldrawUiPopover>
+
+      {!autoHeight && (
+        <TldrawUiToolbarButton
+          type="icon"
+          title="Fit height to content"
+          data-testid="style-picker.code.fit"
+          onMouseDown={keepCellFocus}
+          onClick={() => act('code fit height', { autoHeight: true })}
+        >
+          <ChevronsUpDown className="h-4 w-4" />
+        </TldrawUiToolbarButton>
+      )}
+      <TldrawUiToolbarButton
+        type="icon"
+        title="Copy code"
+        data-testid="style-picker.code.copy"
+        onMouseDown={keepCellFocus}
+        onClick={copy}
+      >
+        {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+      </TldrawUiToolbarButton>
+    </>
+  );
+}
+
+/** SVG diagram: jump straight into its in-shape editor panel. */
+function SvgDiagramControlsGroup({ shape }: { shape: SvgDiagramShape }) {
+  const editor = useEditor();
+  return (
+    <TldrawUiToolbarButton
+      type="icon"
+      title="Edit diagram"
+      data-testid="style-picker.svg.edit"
+      onMouseDown={keepCellFocus}
+      onClick={() => editor.setEditingShape(shape.id)}
+    >
+      <PencilLine className="h-4 w-4" />
+    </TldrawUiToolbarButton>
+  );
+}
+
+/** Equation: open the LaTeX editor + copy the source. */
+function MathBlockControlsGroup({ shape }: { shape: MathBlockShape }) {
+  const editor = useEditor();
+  const [copied, setCopied] = useState(false);
+  const copy = () => {
+    navigator.clipboard?.writeText(shape.props.latex).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
+  };
+  return (
+    <>
+      <TldrawUiToolbarButton
+        type="icon"
+        title="Edit equation"
+        data-testid="style-picker.math.edit"
+        onMouseDown={keepCellFocus}
+        onClick={() => editor.setEditingShape(shape.id)}
+      >
+        <Sigma className="h-4 w-4" />
+      </TldrawUiToolbarButton>
+      <TldrawUiToolbarButton
+        type="icon"
+        title="Copy LaTeX"
+        data-testid="style-picker.math.copy"
+        onMouseDown={keepCellFocus}
+        onClick={copy}
+      >
+        {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+      </TldrawUiToolbarButton>
+    </>
+  );
+}
+
 // `track` re-renders when the reactive editor state it reads changes — that
 // is what makes the toolbar follow the selection.
 export const ContextualStylePanel = track(() => {
@@ -958,15 +1148,28 @@ export const ContextualStylePanel = track(() => {
     selectedShapes.length === 1 && selectedShapes[0].type === 'callout-card'
       ? (selectedShapes[0] as CalloutCardShape)
       : null;
+  const onlyCodeBlock =
+    selectedShapes.length === 1 && selectedShapes[0].type === 'code-block'
+      ? (selectedShapes[0] as CodeBlockShape)
+      : null;
+  const onlySvgDiagram =
+    selectedShapes.length === 1 && selectedShapes[0].type === 'svg-diagram'
+      ? (selectedShapes[0] as SvgDiagramShape)
+      : null;
+  const onlyMathBlock =
+    selectedShapes.length === 1 && selectedShapes[0].type === 'math-block'
+      ? (selectedShapes[0] as MathBlockShape)
+      : null;
   // a cell editor is open on the selected table: the in-cell rich text
   // toolbar (colour/link/bold/code/…) owns the screen — the element panel
   // steps aside entirely instead of fighting it for space
   const editingTableCell = !!onlyTable && editor.getEditingShapeId() === onlyTable.id;
   if (editingTableCell) return null;
   // text-selection context (word or select-all): the main option bar steps
-  // aside so only the content edit bar shows; table/card structure
-  // groups are not string styling and stay put
-  if (hasActiveTextSelection(textEditor) && !onlyTable && !onlyCard) return null;
+  // aside so only the content edit bar shows; table/card/code/diagram/math
+  // structure groups are not string styling and stay put
+  const singletonGroup = onlyTable ?? onlyCard ?? onlyCodeBlock ?? onlySvgDiagram ?? onlyMathBlock;
+  if (hasActiveTextSelection(textEditor) && !singletonGroup) return null;
 
   const color = styles.get(DefaultColorStyle);
   const fill = styles.get(DefaultFillStyle);
@@ -981,6 +1184,16 @@ export const ContextualStylePanel = track(() => {
   const textAlign = styles.get(DefaultTextAlignStyle);
   const labelAlign = styles.get(DefaultHorizontalAlignStyle);
   const verticalAlign = styles.get(DefaultVerticalAlignStyle);
+
+  // An empty pill would still paint nothing but swallow pointer events near
+  // the shape: when neither a component group nor any style entry offers
+  // controls for this selection, render nothing at all.
+  const hasPanelContent =
+    !!singletonGroup ||
+    allText ||
+    multipleSelected ||
+    !!(color || fill || dash || (size && !allText) || font || geo || arrowKind || arrowheadStart || arrowheadEnd || spline || textAlign || labelAlign || verticalAlign);
+  if (!hasPanelContent) return null;
 
   // getSelectionBounds collapses the rotated bounds to zero height so the
   // toolbar sits just above the top edge of the selection. Tables float
@@ -1002,6 +1215,9 @@ export const ContextualStylePanel = track(() => {
       {multipleSelected && <AlignmentMenu />}
       {onlyTable && <TableControlsGroup shape={onlyTable} />}
       {onlyCard && <CardControlsGroup shape={onlyCard} />}
+      {onlyCodeBlock && <CodeBlockControlsGroup shape={onlyCodeBlock} />}
+      {onlySvgDiagram && <SvgDiagramControlsGroup shape={onlySvgDiagram} />}
+      {onlyMathBlock && <MathBlockControlsGroup shape={onlyMathBlock} />}
       {color && (
         <StylePicker
           uiType="color"
