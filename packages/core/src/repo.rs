@@ -746,7 +746,7 @@ pub async fn delete_topic_page(pool: &SqlitePool, id: &str) -> Result<(), CoreEr
 
 /// Count shapes in a tldraw snapshot without trusting its exact layout:
 /// they live under document.store keyed as "shape:<id>".
-fn count_shapes(snapshot: &serde_json::Value) -> i64 {
+pub(crate) fn count_shapes(snapshot: &serde_json::Value) -> i64 {
     snapshot
         .get("document")
         .and_then(|d| d.get("store"))

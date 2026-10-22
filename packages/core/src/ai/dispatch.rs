@@ -189,13 +189,9 @@ async fn rust_tool(ctx: &DispatchCtx<'_>, name: &str, args: Value) -> Result<Val
                 snapshot["tldraw_version"].as_str(),
             )
             .await?;
-            // The repo call doesn't count shapes; take the number from the
-            // serialized snapshot itself (defensively: snapshot layouts vary).
-            let shape_count = snapshot["snapshot"]["store"]["shapes"]
-                .as_object()
-                .or_else(|| snapshot["snapshot"]["shapes"].as_object())
-                .map(|shapes| shapes.len())
-                .unwrap_or(0);
+            // Same counting rule as the repo layer (whatever snapshot layout
+            // tldraw currently uses).
+            let shape_count = crate::repo::count_shapes(&snapshot["snapshot"]);
             let saved_at = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_millis() as i64)
