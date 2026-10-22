@@ -1,14 +1,24 @@
 import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { HardDriveDownload, Sparkles, type LucideIcon } from 'lucide-react';
+import { isTauri } from '@tauri-apps/api/core';
+import { Bot } from 'lucide-react';
 import { APP_CONTAINER, WorkspaceLayout } from '@/components/layout/workspace-layout';
 
-export type SettingsSection = 'presets' | 'backup';
+export type SettingsSection = 'presets' | 'backup' | 'ai';
 
 const SECTIONS: { id: SettingsSection; label: string; to: string; icon: LucideIcon }[] = [
   { id: 'presets', label: 'Presets', to: '/settings', icon: Sparkles },
+  { id: 'ai', label: 'AI', to: '/settings/ai', icon: Bot },
   { id: 'backup', label: 'Backup', to: '/settings/backup', icon: HardDriveDownload },
 ];
+
+/** Sections available for this build: AI lives in the desktop app only. */
+function visibleSections(): typeof SECTIONS {
+  return SECTIONS.filter(
+    (section) => section.id !== 'ai' || isTauri(),
+  );
+}
 
 /**
  * Settings shell: the same workspace chrome (navbar + breadcrumb) with a
@@ -26,9 +36,7 @@ export function SettingsLayout({
   const crumbs =
     section === 'presets'
       ? [{ label: 'Settings' }]
-      : [{ label: 'Settings', to: '/settings' }, { label: current.label }];
-
-  return (
+      : [{ label: 'Settings', to: '/settings' }, { label: current.label }];  return (
     <WorkspaceLayout crumbs={crumbs}>
       <div className={`${APP_CONTAINER} flex flex-1 items-start gap-10 pb-16 pt-10`}>
         <aside className="w-48 shrink-0" aria-label="Settings">
@@ -36,7 +44,7 @@ export function SettingsLayout({
             SETTINGS
           </div>
           <nav className="flex flex-col gap-0.5">
-            {SECTIONS.map(({ id, label, to, icon: Icon }) => (
+            {visibleSections().map(({ id, label, to, icon: Icon }) => (
               <Link
                 key={id}
                 to={to}

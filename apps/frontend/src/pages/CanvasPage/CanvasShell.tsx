@@ -15,6 +15,9 @@ import { useIconFinderStore } from '@/stores/icon-finder-store';
 import { PageFrameStack } from '@/features/canvas/components/page-frame-stack';
 import { ViewModeContext } from '@/features/canvas/view-mode';
 import { CanvasTopBar } from '@/features/canvas/components/canvas-top-bar';
+import { AiChatPanel, AiConfirmCard } from '@/features/ai/components/ai-chat-panel';
+import { useAiStore } from '@/features/ai/ai-store';
+import { useAiBridge } from '@/features/ai/use-ai-bridge';
 import { ZoomSlotContext } from '@/components/global/canvas/PresetToolbar';
 import { CanvasSettingsCard } from '@/components/global/canvas/CanvasSettingsCard';
 import { ViewModeHint } from '@/components/global/canvas/ViewModeHint';
@@ -23,6 +26,7 @@ import { useChapterPreset } from '@/hooks/canvas/use-chapter-preset';
 import { usePageView } from '@/hooks/canvas/use-page-view';
 import { useCanvasUi } from '@/hooks/canvas/use-canvas-ui';
 import type { Chapter, Notebook } from '@/lib/ipc';
+import { isTauri } from '@tauri-apps/api/core';
 
 /** The mounted canvas: top bar, tldraw editor and its slots. Pure composition
  *  — data and behavior come from hooks/features. */
@@ -75,6 +79,10 @@ export function CanvasShell({ notebook, chapter }: { notebook: Notebook; chapter
 
   const isPageChapter = chapter.canvas_type === 'page';
   const activeTopic = topics.find((t) => t.id === activeTopicId) ?? null;
+
+  // AI bridge: desktop only — pins this chapter as the AI's canvas and
+  // answers the backend's `canvas:call` tool invocations.
+  useAiBridge(chapter.id, getEditor);
 
   const pageView = usePageView({
     chapter,
@@ -167,6 +175,26 @@ export function CanvasShell({ notebook, chapter }: { notebook: Notebook; chapter
     return () => window.removeEventListener('keydown', onKey, true);
   }, [isPageChapter, getEditor, pageView.viewMode, pageView.toggleViewMode, settingsOpen]);
 
+  // the AI chat panel keyboard command: ctrl/cmd+alt+A toggles the chat
+  // overlay (desktop only). Same capture-phase + e.code pattern as the icon
+  // finder above (AltGr-safe) so tldraw never sees the combo.
+  useEffect(() => {
+    if (!isTauri()) return;
+    const onKey = (e: KeyboardEvent) => {
+      const isA = e.code === 'KeyA' || e.key.toLowerCase() === 'a';
+      if (!isA || !(e.ctrlKey || e.metaKey) || !e.altKey) return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
+      const ed = getEditor();
+      if (!ed || ed.getEditingShapeId()) return;
+      e.preventDefault();
+      e.stopPropagation();
+      useAiStore.getState().toggle();
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [getEditor]);
+
   function handlePaddingChange(value: number) {
     const clamped = Math.min(Math.max(Math.round(value) || 0, 0), 200);
     setPagePadding(clamped);
@@ -207,6 +235,7 @@ export function CanvasShell({ notebook, chapter }: { notebook: Notebook; chapter
             }
             onOpenSettings={() => setSettingsOpen((o) => !o)}
             onBack={() => navigate(`/notebooks/${notebook.id}`)}
+            onOpenAi={isTauri() ? () => useAiStore.getState().toggle() : undefined}
           />
         )}
 
@@ -258,6 +287,16 @@ export function CanvasShell({ notebook, chapter }: { notebook: Notebook; chapter
           </ViewModeContext.Provider>
 
           {pageView.viewMode && <ViewModeHint />}
+
+          {/* AI overlays: the chat panel and the destructive-tool confirm
+              card (rendered outside the panel so deletes are confirmable
+              even while the panel is closed). */}
+          {!pageView.viewMode && isTauri() && (
+            <>
+              <AiChatPanel />
+              <AiConfirmCard />
+            </>
+          )}
 
           <CanvasSettingsCard
             open={settingsOpen}

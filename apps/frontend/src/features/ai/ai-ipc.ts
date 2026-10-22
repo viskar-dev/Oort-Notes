@@ -29,7 +29,7 @@ export interface AiHistoryMessage {
 export interface AiCanvasCall {
   id: string;
   name: string;
-  args: Record<string, unknown>;
+  args?: Record<string, unknown>;
   /** The chapter the call was pinned to (the executor rejects the call if
    *  the user has since switched canvases). */
   canvas_id: string;

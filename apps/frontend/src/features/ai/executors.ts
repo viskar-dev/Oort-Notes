@@ -170,19 +170,19 @@ function asScheme(value: ToolArgs['shape']): 'rect' | 'round' | 'diamond' | 'not
 function createNote(editor: Editor, args: ToolArgs): ToolValue {
   const text = requiredText(args);
   const at = viewportPoint(editor, args.x, args.y);
-  let id: TLShapeId | null = null;
+  const id = newShapeId();
   editor.run(() => {
-    id = editor.createShape({
-      id: newShapeId(),
+    editor.createShape({
+      id,
       type: 'note',
       x: at.x - DEFAULT_NOTE_W / 2,
       y: at.y - DEFAULT_NOTE_W / 2,
       props: { richText: toRichText(text) },
-    }).next.id;
+    });
     // "Preferred width"(>120): notes resize through their scale prop.
     if (typeof args.width === 'number' && args.width >= 120) {
       const scale = Math.max(0.35, Math.min(4, args.width / DEFAULT_NOTE_W));
-      editor.updateShape({ id: id!, type: 'note', props: { scale } });
+      editor.updateShape({ id, type: 'note', props: { scale } });
     }
   });
   return { created: id };
@@ -198,15 +198,15 @@ async function createSvg(editor: Editor, args: ToolArgs): Promise<ToolValue> {
   const at = viewportPoint(editor, args.x, args.y);
   const w = typeof args.width === 'number' && args.width >= 120 ? args.width : 320;
   const h = Math.round(w * prepared.ratio);
-  let id: TLShapeId;
+  const id = newShapeId();
   editor.run(() => {
-    id = editor.createShape({
-      id: newShapeId(),
+    editor.createShape({
+      id,
       type: 'svg-diagram',
       x: at.x - w / 2,
       y: at.y - h / 2,
       props: { svg: prepared.svg, ratio: prepared.ratio, draft: svg.trim(), h },
-    }).next.id;
+    });
   });
   return { created: id, name: name || null, w, h };
 }

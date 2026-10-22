@@ -26,6 +26,10 @@ const PresetEditorPage = lazy(() =>
   import('@/pages/PresetEditorPage').then((m) => ({ default: m.PresetEditorPage })),
 );
 
+const AiSettingsPage = lazy(() =>
+  import('@/features/ai/components/ai-settings-page').then((m) => ({ default: m.AiSettingsPage })),
+);
+
 /** Full-page fallback while a split route chunk loads. */
 function LoadingScreen() {
   return (
@@ -93,6 +97,7 @@ export default function App() {
             <Route path="/broken-link" element={<BrokenLink />} errorElement={<RouteErrorBoundary />} />
             <Route path="/settings" element={<SettingsPage />} errorElement={<RouteErrorBoundary />} />
             <Route path="/settings/backup" element={<BackupPage />} errorElement={<RouteErrorBoundary />} />
+            <Route path="/settings/ai" element={<AiSettingsPage />} errorElement={<RouteErrorBoundary />} />
             <Route path="/settings/presets/:presetId" element={<PresetEditorPage />} errorElement={<RouteErrorBoundary />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>

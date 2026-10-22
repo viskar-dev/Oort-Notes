@@ -23,7 +23,7 @@ import { useViewModeStore } from '@/stores/view-mode-store';
  */
 export function useAiBridge(chapterId: string, getEditor: () => Editor | null): void {
   // Shared, chapter-independent executor deps; only `editor` is fresh per call.
-  const depsRef = useRef<AiExecutorDeps>({
+  const depsRef = useRef<Omit<AiExecutorDeps, 'editor'>>({
     confirm: (title, detail) =>
       useAiConfirmStore.getState().requestConfirm(title, detail),
     readOnly: () => useViewModeStore.getState().on,
@@ -41,7 +41,9 @@ export function useAiBridge(chapterId: string, getEditor: () => Editor | null): 
         if (!editor) throw new Error('the canvas editor is not ready yet');
         return executeAiTool({ ...depsRef.current, editor }, name, args);
       },
-      answer: (id, ok, error, result) => answerCanvasCall(id, ok, error, result),
+      answer: async (id, ok, error, result) => {
+        await answerCanvasCall(id, ok, error, result);
+      },
     };
 
     void (async () => {
