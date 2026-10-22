@@ -1,31 +1,16 @@
-import { useEffect, useRef } from 'react';
-import { createPortal } from 'react-dom';
-import { useEditor } from 'tldraw';
-import { createShapeId } from 'tldraw';
-import { Code, Globe, Image as ImageIcon, MessageSquareQuote, Sigma, StickyNote, Table as TableIcon, Workflow } from 'lucide-react';
+import { useEffect } from 'react';
+import { createShapeId, useEditor } from 'tldraw';
+import { Code, MessageSquareQuote, Sigma, Table as TableIcon, Workflow } from 'lucide-react';
 
 /**
- * The components picker, shown while the Components tool is active. Escape
- * or clicking anywhere outside the menu (or picking any other tool)
- * deactivates the tool and closes the picker.
+ * The icon-only content of the components picker, shown inside a popover
+ * anchored to the Components toolbar button (see PresetToolbar) — the same
+ * clean, position-tracked panel the Shapes picker opens. Outside clicks are
+ * closed by the popover host (the tool deactivates); Escape exits the tool.
  */
-export function ComponentsMenu() {
-  const editor = useEditor();
-  const menuRef = useRef<HTMLDivElement | null>(null);
 
-  // close on outside clicks: deactivate the tool so the menu unmounts
-  useEffect(() => {
-    const onPointerDown = (e: PointerEvent) => {
-      const target = e.target as Element | null;
-      if (!target) return;
-      if (menuRef.current?.contains(target)) return;
-      // the toolbar's own toggle button handles itself
-      if (target.closest?.('[data-testid="toolbar.components"]')) return;
-      editor.setCurrentTool('select');
-    };
-    document.addEventListener('pointerdown', onPointerDown, true);
-    return () => document.removeEventListener('pointerdown', onPointerDown, true);
-  }, [editor]);
+export function ComponentsMenuContent() {
+  const editor = useEditor();
 
   // Escape exits the tool (closes the menu)
   useEffect(() => {
@@ -105,55 +90,31 @@ export function ComponentsMenu() {
     editor.setCurrentTool('select');
   }
 
-  return createPortal(
+  /** Icon + creation entry of the picker (sticky note, image and embed were
+   *  removed by design — the canvas already carries dedicated tools). */
+  const entries = [
+    { name: 'Code block', Icon: Code, create: createCodeBlock },
+    { name: 'SVG diagram', Icon: Workflow, create: createSvgDiagram },
+    { name: 'Table', Icon: TableIcon, create: createTable },
+    { name: 'Card', Icon: MessageSquareQuote, create: createCard },
+    { name: 'Katex', Icon: Sigma, create: createMathEquation },
+  ];
+
+  return (
     <div
-      ref={menuRef}
       data-testid="components-menu"
-      className="tlui-menu absolute bottom-16 z-10 rounded-xl border border-line bg-surface p-1 shadow-xl"
-      style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 4, width: 240, left: 'calc(50% + 170px)' }}
+      className="tlui-menu flex gap-1 rounded-xl border border-line bg-surface p-1 shadow-xl"
     >
-      {(
-        [
-          ['Sticky note', false],
-          ['Code block', true],
-          ['SVG diagram', true],
-          ['Table', true],
-          ['Card', true],
-          ['Image', false],
-          ['Embed', false],
-          ['Katex', true],
-        ] as const
-      ).map(([name, enabled]) => {
-        const Icon = {
-          'Sticky note': StickyNote,
-          'Code block': Code,
-          'SVG diagram': Workflow,
-          Table: TableIcon,
-          Card: MessageSquareQuote,
-          Image: ImageIcon,
-          Embed: Globe,
-          Katex: Sigma,
-        }[name];
-        return (
-          <button
-            key={name}
-            disabled={!enabled}
-            title={enabled ? name : 'Coming soon'}
-            onClick={() => {
-              if (name === 'Code block') createCodeBlock();
-              else if (name === 'SVG diagram') createSvgDiagram();
-              else if (name === 'Katex') createMathEquation();
-              else if (name === 'Table') createTable();
-              else if (name === 'Card') createCard();
-            }}
-            className="flex flex-col items-center gap-1 rounded-lg px-2 py-3 text-xs text-muted-foreground enabled:text-ink enabled:hover:bg-raised disabled:cursor-not-allowed"
-          >
-            <Icon className="h-5 w-5" />
-            {name}
-          </button>
-        );
-      })}
-    </div>,
-    editor.getContainer(),
+      {entries.map(({ name, Icon, create }) => (
+        <button
+          key={name}
+          title={name}
+          onClick={create}
+          className="flex items-center justify-center rounded-lg p-2.5 text-muted-foreground transition-colors hover:bg-raised hover:text-ink"
+        >
+          <Icon className="h-5 w-5" />
+        </button>
+      ))}
+    </div>
   );
 }

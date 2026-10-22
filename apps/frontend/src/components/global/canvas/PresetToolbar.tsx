@@ -28,7 +28,7 @@ import { FloatingPopover } from '@/features/canvas/components/contextual-style-p
 import { defaultConfig } from '@/lib/preset-config';
 import { TEXT_BASE_PX, type ToolId } from '@/constants/presets/catalog';
 import { useUiPresetStore } from '@/stores/ui-preset-store';
-import { ComponentsMenu } from './ComponentsMenu';
+import { ComponentsMenuContent } from './ComponentsMenu';
 
 /** The toolbar a chapter sees without an assigned preset: the same strip a
  *  fresh preset produces (with the collapsed Shapes picker) rather than
@@ -152,8 +152,10 @@ function PresetToolbar({ zoomMenu }: { zoomMenu?: React.ReactNode }) {
   }, [editor, presetConfig]);
 
   const componentsVisible = config.toolbar.find((t) => t.id === 'components')?.visible !== false;
+  const componentsTriggerRef = useRef<HTMLButtonElement | null>(null);
   const componentsButton = componentsVisible ? (
     <TldrawUiToolbarButton
+      ref={componentsTriggerRef}
       type="tool"
       title="Components"
       data-testid="toolbar.components"
@@ -210,7 +212,19 @@ function PresetToolbar({ zoomMenu }: { zoomMenu?: React.ReactNode }) {
             <TldrawUiToolbar className="tlui-toolbar__tools" label="Toolbar">
               <TldrawUiMenuContextProvider type="toolbar" sourceId="toolbar">
                 {inlineNodes}
-                {isActive && componentsButton && <ComponentsMenu />}
+                {/* the components picker opens anchored to its own button —
+                    the clean, position-tracked popover the Shapes picker
+                    uses (outside clicks deactivate the tool) */}
+                {componentsButton && (
+                  <FloatingPopover
+                    anchorRef={componentsTriggerRef}
+                    open={isActive}
+                    onClose={() => editor.setCurrentTool('select')}
+                    placement="top"
+                  >
+                    <ComponentsMenuContent />
+                  </FloatingPopover>
+                )}
                 {zoomMenu && (
                   <div className="oort-toolbar__zoom">
                     <span className="oort-toolbar__zoom-divider" aria-hidden />
