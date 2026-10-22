@@ -56,7 +56,7 @@ export function aiChat(
   messages: AiHistoryMessage[],
   userMessage: string,
 ): Promise<AiAgentEvent[]> {
-  return invoke<AiAgentEvent[]>('ai_chat', { messages, user_message: userMessage });
+  return invoke<AiAgentEvent[]>('ai_chat', { messages, userMessage });
 }
 
 /** Point the AI at this canvas (null clears the pointer). */
@@ -75,7 +75,7 @@ export function aiGetConfig(): Promise<{ base_url: string; model: string }> {
 }
 
 export function aiSetConfig(baseUrl: string, model: string): Promise<void> {
-  return invoke<void>('set_ai_config', { base_url: baseUrl, model });
+  return invoke<void>('set_ai_config', { baseUrl, model });
 }
 
 export function aiHasKey(): Promise<boolean> {
