@@ -1,3 +1,4 @@
+pub mod ai;
 pub mod backup;
 pub mod db;
 pub mod error;
