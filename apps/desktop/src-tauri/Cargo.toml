@@ -25,6 +25,10 @@ sqlx.workspace = true
 reqwest.workspace = true
 tracing.workspace = true
 dotenvy.workspace = true
+# AI: MCP streamable-HTTP host over axum + random bearer token
+rmcp.workspace = true
+axum.workspace = true
+rand.workspace = true
 
 [lints]
 workspace = true

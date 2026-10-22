@@ -43,6 +43,8 @@ async-openai = { version = "0.42", features = ["chat-completion"] }
 # Model Context Protocol server (AI: external clients drive the canvas over
 # streamable HTTP; only the desktop crate depends on it)
 rmcp = { version = "0.7", default-features = false, features = [
+    "base64",
+    "macros",
     "server",
     "transport-streamable-http-server",
 ] }

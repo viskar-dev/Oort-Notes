@@ -3,6 +3,16 @@ use sqlx::SqlitePool;
 use tauri::Manager;
 use tauri::State;
 
+mod ai_bridge;
+mod ai_commands;
+mod ai_mcp;
+
+// Tauri's generate_handler! needs the command wrappers in this scope.
+use ai_commands::{
+    ai_chat, canvas_result, clear_api_key, get_ai_config, get_mcp_connection_info,
+    has_api_key, list_tool_names, set_active_canvas, set_ai_config, set_api_key,
+};
+
 type R<T> = Result<T, String>;
 
 fn map(e: note_core::CoreError) -> String {
@@ -637,6 +647,17 @@ pub fn run() {
                 let store = backup::keyring_store::KeyringTokenStore::new(scheduler_pool.clone());
                 backup::scheduler_loop(scheduler_pool, std::sync::Arc::new(store)).await;
             });
+
+            // AI: the canvas bridge + the local MCP server both live here.
+            let bridge = std::sync::Arc::new(ai_bridge::DesktopBridge::new(
+                app.handle().clone(),
+            ));
+            app.manage(bridge.clone());
+            let shared = std::sync::Arc::new(ai_mcp::ArcMcpShared {
+                pool: pool.clone(),
+                bridge,
+            });
+            tauri::async_runtime::spawn(ai_mcp::run(app.handle().clone(), shared));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -680,6 +701,16 @@ pub fn run() {
             backup_status,
             drive_backup_info,
             import_backup,
+            set_active_canvas,
+            get_ai_config,
+            set_ai_config,
+            set_api_key,
+            has_api_key,
+            clear_api_key,
+            list_tool_names,
+            get_mcp_connection_info,
+            ai_chat,
+            canvas_result,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
