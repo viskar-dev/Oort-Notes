@@ -1,95 +1,76 @@
 import { describe, expect, it } from 'vitest';
-import { labelFromProps, richTextToPlainText } from './rich-text';
+import { buildRichDocument, richTextToPlainText } from './rich-text';
 
-describe('richTextToPlainText', () => {
-  it('reads a plain paragraph', () => {
-    expect(
-      richTextToPlainText({
-        type: 'doc',
-        content: [
-          {
-            type: 'paragraph',
-            content: [{ type: 'text', text: 'Hello world' }],
-          },
-        ],
-      }),
-    ).toBe('Hello world');
+/** Round-trip helper: whatever the builder writes must read back as the
+ *  markdown the user sees on the shape. */
+const read = (text: string) => richTextToPlainText(buildRichDocument(text));
+
+describe('buildRichDocument', () => {
+  it('plain paragraphs stay paragraphs', () => {
+    const doc = buildRichDocument('first line\nsecond line');
+    expect(doc.type).toBe('doc');
+    expect(doc.content).toHaveLength(2);
+    expect(doc.content?.[0].type).toBe('paragraph');
   });
 
-  it('joins inline runs without separators', () => {
-    expect(
-      richTextToPlainText({
-        type: 'doc',
-        content: [
-          {
-            type: 'paragraph',
-            content: [
-              { type: 'text', text: 'To be, or ' },
-              { type: 'text', marks: [], text: 'not ' },
-              { type: 'text', text: 'to be' },
-            ],
-          },
-        ],
-      }),
-    ).toBe('To be, or not to be');
+  it('bullets and ordered lists become tiptap list nodes', () => {
+    const doc = buildRichDocument('- one\n- two\n1. alpha\n2. beta');
+    const types = doc.content?.map((node) => node.type);
+    expect(types).toEqual(['bulletList', 'orderedList']);
+    expect(doc.content?.[0].content?.[0].type).toBe('listItem');
   });
 
-  it('separates blocks with newlines', () => {
-    expect(
-      richTextToPlainText({
-        type: 'doc',
-        content: [
-          { type: 'paragraph', content: [{ type: 'text', text: 'first' }] },
-          { type: 'paragraph', content: [{ type: 'text', text: 'second' }] },
-        ],
-      }),
-    ).toBe('first\nsecond');
+  it('inline math becomes math nodes with latex preserved', () => {
+    const runs = buildRichDocument('$E=mc^2$ and $x^2$').content?.[0].content ?? [];
+    const math = runs.filter((node) => node.type === 'math');
+    expect(math).toHaveLength(2);
+    expect(math[0].attrs).toEqual({ latex: 'E=mc^2', display: false });
   });
 
-  it('breaks lines on hardBreak runs', () => {
-    expect(
-      richTextToPlainText({
-        type: 'doc',
-        content: [
-          {
-            type: 'paragraph',
-            content: [
-              { type: 'text', text: 'one' },
-              { type: 'hardBreak' },
-              { type: 'text', text: 'two' },
-            ],
-          },
-        ],
-      }),
-    ).toBe('one\ntwo');
+  it('display math is marked display and survives $$ and \\[ \\]', () => {
+    const first = (text: string) =>
+      (buildRichDocument(text).content?.[0].content ?? []).find((node) => node.type === 'math');
+    expect(first('$$\\int_0^1 x dx$$')).toMatchObject({
+      type: 'math',
+      attrs: { latex: '\\int_0^1 x dx', display: true },
+    });
+    expect(first('\\[a^2\\]')?.attrs?.display).toBe(true);
   });
 
-  it('survives non-json input', () => {
-    expect(richTextToPlainText(undefined)).toBe('');
-    expect(richTextToPlainText(null)).toBe('');
-    expect(richTextToPlainText(5)).toBe('');
-    expect(richTextToPlainText('just a string')).toBe('just a string');
-  });
-});
-
-describe('labelFromProps', () => {
-  it('prefers richText over plain text', () => {
-    expect(
-      labelFromProps({
-        richText: { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'rich' }] }] },
-        text: 'plain',
-      }),
-    ).toBe('rich');
+  it('bold, italic and code stay verbatim as marks', () => {
+    const runs = buildRichDocument('**bold** and `code` and *it*').content?.[0].content ?? [];
+    expect(runs).toContainEqual({ type: 'text', text: 'bold', marks: [{ type: 'bold' }] });
+    expect(runs).toContainEqual({ type: 'text', text: 'code', marks: [{ type: 'code' }] });
+    expect(runs).toContainEqual({ type: 'text', text: 'it', marks: [{ type: 'italic' }] });
   });
 
-  it('falls back to a plain text prop (arrows)', () => {
-    expect(labelFromProps({ text: 'arrow label' })).toBe('arrow label');
+  it('syntax the builder does not know passes through verbatim rather than being eaten', () => {
+    expect(read('~~strike~~ and #hashtag done')).toBe('~~strike~~ and #hashtag done');
+    expect(read('see [1] and [2]')).toBe('see [1] and [2]');
   });
 
-  it('returns undefined for empty or missing labels', () => {
-    expect(labelFromProps(undefined)).toBeUndefined();
-    expect(labelFromProps({ text: '' })).toBeUndefined();
-    expect(labelFromProps({ richText: null })).toBeUndefined();
-    expect(labelFromProps({ richText: 2 })).toBeUndefined();
+  it('round-trips with the reader: math survives, marks read as rendered text', () => {
+    expect(read('$\\alpha$ work')).toBe('$\\alpha$ work');
+    // Marks read as the TEXT the shape shows (rendered bold does not keep
+    // its asterisks) — same rule as user-typed rich text.
+    expect(read('**heavy** text')).toBe('heavy text');
+    expect(read('# not a heading')).toBe('# not a heading');
+  });
+
+  it('never emits empty text nodes (tldraw rejects those with "Empty text nodes")', () => {
+    const walk = (node: unknown): void => {
+      if (Array.isArray(node)) {
+        for (const child of node) walk(child);
+        return;
+      }
+      if (node && typeof node === 'object') {
+        const record = node as { text?: unknown; content?: unknown; type?: string };
+        expect(record.type === 'text' ? typeof record.text === 'string' && record.text.length > 0 : true).toBe(true);
+        if (record.content) walk(record.content);
+      }
+    };
+    for (const text of ['**bold** start', '', '   ', '$$x$$', '- \n\n', '**a** and *b* and `c`']) {
+      walk(buildRichDocument(text));
+    }
   });
 });

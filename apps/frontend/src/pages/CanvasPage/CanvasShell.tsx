@@ -81,8 +81,20 @@ export function CanvasShell({ notebook, chapter }: { notebook: Notebook; chapter
   const activeTopic = topics.find((t) => t.id === activeTopicId) ?? null;
 
   // AI bridge: desktop only — pins this chapter as the AI's canvas and
-  // answers the backend's `canvas:call` tool invocations.
-  useAiBridge(chapter.id, getEditor);
+  // answers the backend's `canvas:call` tool invocations. The context makes
+  // pages-mode geometry (sheet size/count) visible to the tool executors.
+  useAiBridge(chapter.id, getEditor, () => ({
+    canvas_type: chapter.canvas_type,
+    page:
+      isPageChapter && chapter.page_width && chapter.page_height
+        ? {
+            width: chapter.page_width,
+            height: chapter.page_height,
+            gap: SHEET_GAP,
+            count: activePages.length,
+          }
+        : null,
+  }));
 
   const pageView = usePageView({
     chapter,

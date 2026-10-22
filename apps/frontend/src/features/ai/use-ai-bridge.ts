@@ -21,9 +21,19 @@ import { useViewModeStore } from '@/stores/view-mode-store';
  * 4. on first mount, checks the Rust registry against the executor list
  *    (dev-time loudness for a registry/executor drift).
  */
-export function useAiBridge(chapterId: string, getEditor: () => Editor | null): void {
+export function useAiBridge(
+  chapterId: string,
+  getEditor: () => Editor | null,
+  /** Chapter rendering context (pages-mode geometry) for the executors. */
+  getContext?: () => { canvas_type: string; page: { width: number; height: number; gap: number; count: number } | null },
+): void {
   // Shared, chapter-independent executor deps; only `editor` is fresh per call.
+  // getContext goes through a ref so the context stays live (sheet count etc).
+  const contextRef = useRef(getContext);
+  contextRef.current = getContext;
   const depsRef = useRef<Omit<AiExecutorDeps, 'editor'>>({
+    context: () =>
+      contextRef.current?.() ?? { canvas_type: 'infinite', page: null },
     confirm: (title, detail) =>
       useAiConfirmStore.getState().requestConfirm(title, detail),
     readOnly: () => useViewModeStore.getState().on,

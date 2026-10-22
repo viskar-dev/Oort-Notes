@@ -16,6 +16,7 @@ function makeEditor(): AiExecutorDeps['editor'] {
 function deps(): AiExecutorDeps {
   return {
     editor: makeEditor(),
+    context: () => ({ canvas_type: 'infinite', page: null }),
     confirm: async () => true,
     readOnly: () => useViewModeStore.getState().on,
   };
@@ -37,8 +38,11 @@ describe('executeAiTool routing', () => {
       await expect(
         executeAiTool(deps(), 'delete_shapes', { ids: ['shape:a'] }),
       ).rejects.toThrow('view mode');
-      // Reads still work in view mode.
-      await expect(executeAiTool(deps(), 'get_canvas', {})).resolves.toEqual({ shapes: [] });
+      // Reads still work in view mode (get_canvas also reports the context).
+      await expect(executeAiTool(deps(), 'get_canvas', {})).resolves.toEqual({
+        shapes: [],
+        canvas: { canvas_type: 'infinite', page: null },
+      });
     } finally {
       useViewModeStore.setState({ on: false });
     }

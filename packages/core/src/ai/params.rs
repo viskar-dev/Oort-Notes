@@ -24,13 +24,99 @@ pub struct ScreenshotArgs {
 /// Create a labeled note box with the given text.
 #[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
 pub struct CreateNoteArgs {
-    /// Note text (plain text; the canvas renders it as a text shape).
+    /// Note text. Supports light markdown and inline math: paragraphs, '- '
+    /// bulleted lists ('1. ' numbered), **bold**, *italic*, `code`,
+    /// $inline math$, and $$display math$$ lines.
     pub text: String,
-    /// World x position (defaults to the current viewport center).
+    /// World x position (unset ⇒ placed automatically beside existing content).
     pub x: Option<f64>,
-    /// World y position (defaults to the current viewport center).
+    /// World y position (unset ⇒ placed automatically below existing content).
     pub y: Option<f64>,
+    /// Where to put the block relative to existing content
+    /// ('left' | 'right' | 'above' | 'below', default 'below').
+    pub side: Option<String>,
     /// Preferred width in world units (default 280).
+    pub width: Option<f64>,
+}
+
+/// Create a rendered equation block (KaTeX display math).
+#[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
+pub struct CreateMathBlockArgs {
+    /// LaTeX source WITHOUT $ delimiters, e.g. "E = mc^2".
+    pub latex: String,
+    /// World x position (unset ⇒ placed automatically beside existing content).
+    pub x: Option<f64>,
+    /// World y position (unset ⇒ placed automatically below existing content).
+    pub y: Option<f64>,
+    /// Where to put the block relative to existing content
+    /// ('left' | 'right' | 'above' | 'below', default 'below').
+    pub side: Option<String>,
+    /// Preferred width in world units (default 320, minimum 160).
+    pub width: Option<f64>,
+}
+
+/// Create a syntax-highlighted code block.
+#[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
+pub struct CreateCodeBlockArgs {
+    /// The source code, verbatim.
+    pub code: String,
+    /// Language id: typescript, javascript, rust, python, java, c, cpp, go,
+    /// html, css, json, bash, sql, or plain (default typescript).
+    pub language: Option<String>,
+    /// World x position (unset ⇒ placed automatically beside existing content).
+    pub x: Option<f64>,
+    /// World y position (unset ⇒ placed automatically below existing content).
+    pub y: Option<f64>,
+    /// Where to put the block relative to existing content
+    /// ('left' | 'right' | 'above' | 'below', default 'below').
+    pub side: Option<String>,
+    /// Preferred width in world units (default 560, minimum 320).
+    pub width: Option<f64>,
+}
+
+/// Create a table from a GitHub-flavored Markdown table.
+#[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
+pub struct CreateTableArgs {
+    /// GFM markdown table with header row and `---` delimiter row, e.g.
+    /// "| Name | Value |" then "| --- | --- |" then rows. Cells may contain
+    /// inline math in $...$.
+    pub markdown: String,
+    /// World x position (unset ⇒ placed automatically beside existing content).
+    pub x: Option<f64>,
+    /// World y position (unset ⇒ placed automatically below existing content).
+    pub y: Option<f64>,
+    /// Where to put the block relative to existing content
+    /// ('left' | 'right' | 'above' | 'below', default 'below').
+    pub side: Option<String>,
+    /// Preferred width in world units (default auto from column count).
+    pub width: Option<f64>,
+}
+
+/// Create a callout card: a titled highlight box with an accent color and
+/// an icon.
+#[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
+pub struct CreateCardArgs {
+    /// Card header (short line).
+    pub title: String,
+    /// Card body. Supports the same light markdown as notes: lists,
+    /// **bold**, `code`, $inline math$.
+    pub body: Option<String>,
+    /// Accent: note (purple) | info (blue) | tip (teal) | success (green) |
+    /// warning (amber) | danger (red). Default note.
+    pub variant: Option<String>,
+    /// Icon: dot | info | tip | success | warning | danger | pin | star |
+    /// bookmark | zap | help. Defaults to the variant's matching icon.
+    pub icon: Option<String>,
+    /// Optional short badge text shown right of the title.
+    pub badge: Option<String>,
+    /// World x position (unset ⇒ placed automatically beside existing content).
+    pub x: Option<f64>,
+    /// World y position (unset ⇒ placed automatically below existing content).
+    pub y: Option<f64>,
+    /// Where to put the block relative to existing content
+    /// ('left' | 'right' | 'above' | 'below', default 'below').
+    pub side: Option<String>,
+    /// Preferred width in world units (default 460, minimum 220).
     pub width: Option<f64>,
 }
 
@@ -41,8 +127,13 @@ pub struct CreateSvgArgs {
     pub name: String,
     /// Raw SVG markup (complete `<svg>...</svg>` document). Must be sanitized.
     pub svg: String,
+    /// World x position (unset ⇒ placed automatically beside existing content).
     pub x: Option<f64>,
+    /// World y position (unset ⇒ placed automatically below existing content).
     pub y: Option<f64>,
+    /// Where to put the block relative to existing content
+    /// ('left' | 'right' | 'above' | 'below', default 'below').
+    pub side: Option<String>,
     /// Preferred render width in world units (default 320).
     pub width: Option<f64>,
 }
@@ -78,10 +169,13 @@ pub struct CreateDiagramArgs {
     pub edges: Vec<DiagramEdge>,
     /// Layout direction ('down' | 'right', default 'down').
     pub direction: Option<String>,
-    /// World space x position (defaults to viewport center).
+    /// World x position (unset ⇒ placed automatically beside existing content).
     pub x: Option<f64>,
-    /// World space y position (defaults to viewport center).
+    /// World y position (unset ⇒ placed automatically below existing content).
     pub y: Option<f64>,
+    /// Where to put the diagram relative to existing content
+    /// ('left' | 'right' | 'above' | 'below', default 'below').
+    pub side: Option<String>,
 }
 
 /// Create arbitrary tldraw shapes from partial shape objects.

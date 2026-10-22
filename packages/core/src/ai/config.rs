@@ -37,22 +37,46 @@ impl Default for AiConfig {
     }
 }
 
+/// Clean up a user-pasted base URL. OpenAI-compatible clients attach the
+/// endpoint path themselves, so the stored value must be a bare base (e.g.
+/// `https://api.groq.com/openai/v1`), yet people habitually paste the full
+/// `/chat/completions` URL straight from curl samples — silently producing
+/// `.../chat/completions/chat/completions` 404s. Trim whitespace, trailing
+/// slashes, and the endpoint suffix; anything else passes through. Idempotent.
+pub fn normalize_base_url(input: &str) -> String {
+    let mut url = input.trim().trim_end_matches('/').to_string();
+    const ENDPOINT: &str = "/chat/completions";
+    if url
+        .to_lowercase()
+        .ends_with(ENDPOINT.to_lowercase().as_str())
+    {
+        url = url[..url.len() - ENDPOINT.len()].trim_end_matches('/').to_string();
+    }
+    url
+}
+
 /// Load the AI config, falling back to defaults when nothing is stored yet
 /// (so a fresh install is immediately usable after it gets an API key).
 pub async fn load_config(pool: &SqlitePool) -> Result<AiConfig, CoreError> {
     match repo::get_setting(pool, SETTING_AI_CONFIG).await? {
         Some(json) => {
-            let parsed: AiConfig = serde_json::from_str(&json)
+            let mut parsed: AiConfig = serde_json::from_str(&json)
                 .map_err(|e| CoreError::Ai(format!("stored ai config is invalid: {e}")))?;
+            parsed.base_url = normalize_base_url(&parsed.base_url);
             Ok(parsed)
         }
         None => Ok(AiConfig::default()),
     }
 }
 
-/// Persist the AI config as one settings row.
+/// Persist the AI config as one settings row (base URL normalized so a
+/// pasted full endpoint URL can't poison every later request).
 pub async fn save_config(pool: &SqlitePool, config: &AiConfig) -> Result<(), CoreError> {
-    let json = serde_json::to_string(config)
+    let normalized = AiConfig {
+        base_url: normalize_base_url(&config.base_url),
+        model: config.model.trim().to_string(),
+    };
+    let json = serde_json::to_string(&normalized)
         .map_err(|e| CoreError::Ai(format!("cannot serialize ai config: {e}")))?;
     repo::set_setting(pool, SETTING_AI_CONFIG, &json).await
 }
@@ -60,6 +84,54 @@ pub async fn save_config(pool: &SqlitePool, config: &AiConfig) -> Result<(), Cor
 /// Point the AI at a (different) canvas. `None` clears the pointer.
 pub async fn set_active_canvas(pool: &SqlitePool, chapter_id: Option<&str>) -> Result<(), CoreError> {
     repo::set_setting(pool, SETTING_ACTIVE_CANVAS, chapter_id.unwrap_or("")).await
+}
+
+// ---------------------------------------------------------------------
+// MCP endpoint persistence (port + token survive app restarts)
+// ---------------------------------------------------------------------
+
+/// `settings` row holding the serialized [`McpConfig`].
+pub const SETTING_MCP_CONFIG: &str = "mcp_config";
+
+/// The local MCP server's connection info. Persisted (unlike the per-run
+/// discovery file it replaces for identity) so external clients and hosted
+/// connectors keep working without being reconfigured: the port stays the
+/// preferred loopback port as long as it is free and the token stays until
+/// the user rotates it.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct McpConfig {
+    pub port: u16,
+    pub token: String,
+}
+
+/// Load the persisted MCP endpoint, `None` on a fresh install.
+pub async fn load_mcp_config(pool: &SqlitePool) -> Result<Option<McpConfig>, CoreError> {
+    match repo::get_setting(pool, SETTING_MCP_CONFIG).await? {
+        Some(json) => serde_json::from_str(&json)
+            .map(Some)
+            .map_err(|e| CoreError::Ai(format!("stored mcp config is invalid: {e}"))),
+        None => Ok(None),
+    }
+}
+
+/// Persist the MCP endpoint (called after binding settles the port, and by
+/// the "new token" action in the UI).
+pub async fn save_mcp_config(pool: &SqlitePool, config: &McpConfig) -> Result<(), CoreError> {
+    let json = serde_json::to_string(config)
+        .map_err(|e| CoreError::Ai(format!("cannot serialize mcp config: {e}")))?;
+    repo::set_setting(pool, SETTING_MCP_CONFIG, &json).await
+}
+
+/// Fresh 40-character alphanumeric bearer token: the shared generator for
+/// first run and user-initiated rotation.
+pub fn generate_mcp_token() -> String {
+    use rand::distributions::Alphanumeric;
+    use rand::Rng;
+    rand::thread_rng()
+        .sample_iter(&Alphanumeric)
+        .take(40)
+        .map(char::from)
+        .collect()
 }
 
 // ---------------------------------------------------------------------
@@ -134,4 +206,53 @@ pub fn clear_api_key() -> Result<(), CoreError> {
     Err(CoreError::Ai(
         "API key storage is not available: build with the keyring-store feature".into(),
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn generated_tokens_are_alphanumeric_40() {
+        let token = generate_mcp_token();
+        assert_eq!(token.len(), 40);
+        assert!(token.chars().all(|c| c.is_ascii_alphanumeric()));
+        // Rotation must actually change something.
+        assert_ne!(token, generate_mcp_token());
+    }
+
+    #[test]
+    fn mcp_config_round_trips_through_json() {
+        let config = McpConfig { port: 7866, token: generate_mcp_token() };
+        let json = serde_json::to_string(&config).expect("McpConfig must serialize");
+        let parsed: McpConfig = serde_json::from_str(&json).expect("stored json must parse");
+        assert_eq!(parsed.port, config.port);
+        assert_eq!(parsed.token, config.token);
+    }
+
+    #[test]
+    fn normalize_base_url_strips_pasted_endpoint_paths() {
+        // The exact failure the first real user hit (Groq curl sample pasted
+        // whole): the library appends /chat/completions itself.
+        assert_eq!(
+            normalize_base_url("  https://api.groq.com/openai/v1/chat/completions  "),
+            "https://api.groq.com/openai/v1"
+        );
+        assert_eq!(
+            normalize_base_url("https://api.openai.com/v1/"),
+            "https://api.openai.com/v1"
+        );
+        // Already-correct values survive untouched.
+        assert_eq!(
+            normalize_base_url("https://api.openai.com/v1"),
+            "https://api.openai.com/v1"
+        );
+        assert_eq!(
+            normalize_base_url("http://127.0.0.1:1234/v1"),
+            "http://127.0.0.1:1234/v1"
+        );
+        // Idempotent: normalizing twice changes nothing.
+        let once = normalize_base_url("https://api.groq.com/openai/v1/chat/completions");
+        assert_eq!(normalize_base_url(&once), once);
+    }
 }

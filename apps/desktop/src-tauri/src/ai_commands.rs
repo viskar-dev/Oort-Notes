@@ -94,12 +94,55 @@ pub async fn list_tool_names() -> R<Vec<String>> {
         .collect())
 }
 
-/// Where external MCP clients can reach this app right now.
+/// Connection info serialized, then augmented with the canvas pin the AI
+/// would dispatch against right now — the settings card uses it to surface
+/// "is a canvas actually open" without a round-trip through MCP itself.
+async fn mcp_info_value(pool: &SqlitePool, info: crate::ai_mcp::McpConnectionInfo) -> Option<Value> {
+    let mut value = serde_json::to_value(info).ok()?;
+    let canvas = DispatchCtx { pool, bridge: None }
+        .active_canvas()
+        .await
+        .ok()
+        .flatten();
+    value["active_canvas"] = match canvas {
+        Some(canvas) => serde_json::json!({
+            "id": canvas.id,
+            "name": canvas.name,
+            "canvas_type": canvas.canvas_type,
+        }),
+        None => Value::Null,
+    };
+    Some(value)
+}
+
+/// Where external MCP clients can reach this app right now. Stable across
+/// restarts (the port and token are persisted in the settings table).
+/// `active_canvas` reports the pinned canvas (`null` ⇒ none is open, and
+/// frontend-target tools will fail until the user opens one).
 #[tauri::command]
-pub async fn get_mcp_connection_info(state: State<'_, McpState>) -> R<Option<Value>> {
-    Ok(state
-        .connection_info()
-        .map(|info| serde_json::to_value(info).unwrap_or(Value::Null)))
+pub async fn get_mcp_connection_info(
+    pool: State<'_, SqlitePool>,
+    state: State<'_, McpState>,
+) -> R<Option<Value>> {
+    match state.connection_info() {
+        Some(info) => Ok(mcp_info_value(&pool, info).await),
+        None => Ok(None),
+    }
+}
+
+/// Rotate the MCP bearer token. Takes effect immediately — after this, the
+/// old token (and any connector URL embedding it) stops working, and the
+/// connection info this returns must find its way to every client.
+#[tauri::command]
+pub async fn rotate_mcp_token(
+    pool: State<'_, SqlitePool>,
+    state: State<'_, McpState>,
+) -> R<Option<Value>> {
+    let info = state
+        .rotate(&pool, note_core::ai::config::generate_mcp_token())
+        .await
+        .map_err(map)?;
+    Ok(mcp_info_value(&pool, info).await)
 }
 
 // ---------------------------------------------------------------------

@@ -13,5 +13,5 @@ pub mod llm;
 pub mod params;
 pub mod tools;
 
-pub use config::AiConfig;
+pub use config::{AiConfig, McpConfig};
 pub use llm::AgentEvent;

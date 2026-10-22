@@ -10,7 +10,7 @@ mod ai_mcp;
 // Tauri's generate_handler! needs the command wrappers in this scope.
 use ai_commands::{
     ai_chat, canvas_result, clear_api_key, get_ai_config, get_mcp_connection_info,
-    has_api_key, list_tool_names, set_active_canvas, set_ai_config, set_api_key,
+    has_api_key, list_tool_names, rotate_mcp_token, set_active_canvas, set_ai_config, set_api_key,
 };
 
 type R<T> = Result<T, String>;
@@ -709,6 +709,7 @@ pub fn run() {
             clear_api_key,
             list_tool_names,
             get_mcp_connection_info,
+            rotate_mcp_token,
             ai_chat,
             canvas_result,
         ])

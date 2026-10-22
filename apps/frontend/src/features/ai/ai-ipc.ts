@@ -38,6 +38,10 @@ export interface AiCanvasCall {
 export interface AiConnectionInfo {
   port: number;
   token: string;
+  /** The canvas the user currently has open (what canvas tools dispatch
+   *  against), or null when nothing is pinned — remote calls fail with
+   *  "no canvas is open" until they open a chapter in the app. */
+  active_canvas: { id: string; name: string; canvas_type: string } | null;
 }
 
 /** The webview's answer to a `canvas:call`. Returns whether the pending
@@ -59,9 +63,24 @@ export function aiChat(
   return invoke<AiAgentEvent[]>('ai_chat', { messages, userMessage });
 }
 
-/** Point the AI at this canvas (null clears the pointer). */
+/** Point the AI at this canvas (null clears the pointer).
+ *
+ *  Calls are serialized deliberately: opening a canvas fires `pin(chapterA)`
+ *  and React StrictMode's double-mount fires `pin(A) → clear → pin(A)`; if
+ *  those invokes raced, a late `clear` could land *after* the re-pin and the
+ *  server would end up with no canvas pointed at while one is open. The
+ *  promise chain keeps IPC arrival order equal to call order. */
+let pinTail: Promise<void> = Promise.resolve();
 export function aiSetActiveCanvas(chapterId: string | null): Promise<void> {
-  return invoke<void>('set_active_canvas', { id: chapterId });
+  const run = pinTail.then(
+    () => invoke<void>('set_active_canvas', { id: chapterId }),
+    () => invoke<void>('set_active_canvas', { id: chapterId }),
+  );
+  pinTail = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  return run;
 }
 
 /** All registry tool names (internal plumbing included), for the startup
@@ -92,4 +111,10 @@ export function aiClearKey(): Promise<void> {
 
 export function aiMcpInfo(): Promise<AiConnectionInfo | null> {
   return invoke<AiConnectionInfo | null>('get_mcp_connection_info');
+}
+
+/** Generate a new MCP bearer token (invalidate every URL carrying the old
+ *  one) and return the fresh connection info. */
+export function aiRotateMcpToken(): Promise<AiConnectionInfo> {
+  return invoke<AiConnectionInfo>('rotate_mcp_token');
 }

@@ -10,17 +10,35 @@
  *   `canvas:begin`/`canvas:end` events the Rust side sends around batches).
  * - Destructive work goes through the confirm store (inline card in the
  *   AI panel).
+ * - Placement is deterministic: blocks the model creates without explicit
+ *   x/y are laid out against the existing content or the open page sheet,
+ *   never on top of it.
  */
 
-import { getSnapshot, toRichText, type Editor, type TLShapeId } from 'tldraw';
+import { getSnapshot, toRichText, type Box, type Editor, type TLShapeId } from 'tldraw';
 import { prepareSvg } from '@/features/canvas/svg-diagram/svg-diagram-shape';
-import { outlineShapes, type ShapeOutline } from './canvas-outline';
+import { CODE_LANGUAGES } from '@/features/canvas/code-block/code-block-shape';
+import { parseMarkdownTable, createTableFromMarkdown } from '@/features/canvas/table-shape';
+import { outlineShapes } from './canvas-outline';
+import { buildRichDocument } from './rich-text';
 import { confirmShapeDeletion } from './confirm-store';
 import { layoutDiagram } from './diagram-layout';
+
+/** What the executors need to know about the chapter rendering context
+ *  (pages-mode geometry). Provided by the canvas shell via use-ai-bridge. */
+export interface AiCanvasContext {
+  canvas_type: string;
+  /** Pages-mode sheet geometry; null on infinite canvases. */
+  page: { width: number; height: number; gap: number; count: number } | null;
+}
 
 /** Tools the AI may call that change the canvas. Rejected in view mode. */
 const MUTATING_TOOLS = new Set([
   'create_note',
+  'create_math_block',
+  'create_code_block',
+  'create_table',
+  'create_card',
   'create_svg',
   'create_diagram',
   'create_shapes',
@@ -37,6 +55,8 @@ const DEFAULT_NOTE_W = 220;
 
 export interface AiExecutorDeps {
   editor: Editor;
+  /** Chapter rendering context (pages-mode geometry). */
+  context: () => AiCanvasContext;
   /** Destructive gate (inline card in the AI panel). */
   confirm: (title: string, detail: string) => Promise<boolean>;
   /** True in view mode: mutations are rejected, reads go through. */
@@ -46,7 +66,7 @@ export interface AiExecutorDeps {
 type ToolArgs = Record<string, unknown>;
 type ToolValue = Record<string, unknown>;
 
-/** Route one registry tool call by name. Throws user-readable errors — the
+/** Route one registry tool call by name. Throws user-readable errors— the
  *  bridge turns them into the `canvas_result` error field. */
 export async function executeAiTool(
   deps: AiExecutorDeps,
@@ -58,7 +78,7 @@ export async function executeAiTool(
   }
   switch (name) {
     case 'get_canvas':
-      return { shapes: currentPageOutlines(deps.editor) };
+      return getCanvas(deps);
     case 'get_selection':
       return { shapes: outlineShapes(deps.editor, deps.editor.getSelectedShapeIds()) };
     case 'get_snapshot':
@@ -67,11 +87,19 @@ export async function executeAiTool(
     case 'get_screenshot':
       return await screenshot(deps.editor, args);
     case 'create_note':
-      return createNote(deps.editor, args);
+      return createNote(deps, args);
+    case 'create_math_block':
+      return createMathBlock(deps, args);
+    case 'create_code_block':
+      return createCodeBlock(deps, args);
+    case 'create_table':
+      return createTable(deps, args);
+    case 'create_card':
+      return createCard(deps, args);
     case 'create_svg':
-      return await createSvg(deps.editor, args);
+      return await createSvg(deps, args);
     case 'create_diagram':
-      return createDiagram(deps.editor, args);
+      return createDiagram(deps, args);
     case 'create_shapes':
       return createShapes(deps.editor, args);
     case 'update_shapes':
@@ -89,9 +117,11 @@ export async function executeAiTool(
 // reads
 // ---------------------------------------------------------------------------
 
-function currentPageOutlines(editor: Editor): ShapeOutline[] {
+/** get_canvas: outlines plus the pages-mode geometry the layout rules need. */
+function getCanvas(deps: AiExecutorDeps): ToolValue {
+  const editor = deps.editor;
   const ids = [...editor.getCurrentPageShapeIds()];
-  return outlineShapes(editor, ids);
+  return { shapes: outlineShapes(editor, ids), canvas: { ...deps.context() } };
 }
 
 /** Blob → raw base64 (no data: prefix; mime is reported separately). */
@@ -129,15 +159,122 @@ async function screenshot(editor: Editor, args: ToolArgs): Promise<ToolValue> {
 }
 
 // ---------------------------------------------------------------------------
-// shared helpers
+// deterministic placement
 // ---------------------------------------------------------------------------
 
-function viewportPoint(editor: Editor, x: ToolArgs['x'], y: ToolArgs['y']): { x: number; y: number } {
-  const center = editor.getViewportPageBounds().center;
-  const nx = typeof x === 'number' && Number.isFinite(x) ? x : center.x;
-  const ny = typeof y === 'number' && Number.isFinite(y) ? y : center.y;
-  return { x: nx, y: ny };
+interface LayoutRect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
 }
+
+const LAYOUT_GAP = 72;
+const PAGE_INSET = 40;
+
+const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
+
+/** The part of the canvas the AI composes in (the visible viewport on
+ *  infinite canvases; the active sheet in pages mode) plus the bounding box
+ *  of existing content inside it. */
+function layoutRegion(editor: Editor, deps: AiExecutorDeps): { region: LayoutRect; content: LayoutRect | null } {
+  const ctx = deps.context();
+  const viewport = editor.getViewportPageBounds();
+  let region: LayoutRect;
+  if (ctx.page && ctx.canvas_type === 'page') {
+    // Sheets are stacked at y = i * (height + gap); the active one holds the
+    // viewport's vertical midpoint.
+    const pitch = ctx.page.height + ctx.page.gap;
+    const midY = viewport.y + viewport.h / 2;
+    const sheet = clamp(Math.floor(midY / pitch), 0, Math.max(0, ctx.page.count - 1));
+    region = { x: 0, y: sheet * pitch, w: ctx.page.width, h: ctx.page.height };
+  } else {
+    region = { x: viewport.x, y: viewport.y, w: viewport.w, h: viewport.h };
+  }
+
+  let content: LayoutRect | null = null;
+  for (const id of editor.getCurrentPageShapeIds()) {
+    const shape = editor.getShape(id);
+    if (!shape) continue;
+    let bounds: Box;
+    try {
+      const pageBounds = editor.getShapePageBounds(id);
+      if (!pageBounds) continue;
+      bounds = pageBounds;
+    } catch {
+      continue;
+    }
+    // Only content inside the region anchors placement.
+    if (
+      bounds.maxX < region.x ||
+      bounds.minX > region.x + region.w ||
+      bounds.maxY < region.y ||
+      bounds.minY > region.y + region.h
+    ) {
+      continue;
+    }
+    const rect = { x: bounds.minX, y: bounds.minY, w: bounds.w, h: bounds.h };
+    if (!content) {
+      content = rect;
+    } else {
+      const x = Math.min(content.x, rect.x);
+      const y = Math.min(content.y, rect.y);
+      content = {
+        x,
+        y,
+        w: Math.max(content.x + content.w, rect.x + rect.w) - x,
+        h: Math.max(content.y + content.h, rect.y + rect.h) - y,
+      };
+    }
+  }
+  return { region, content };
+}
+
+/** Where a new block of w×h goes. Explicit x/y always win; otherwise it
+ *  attaches to the content bounding box on the requested side ('below'
+ *  default) and is clamped into the region, so AI output never lands on top
+ *  of existing content and stays inside the open sheet. */
+function planPlacement(
+  editor: Editor,
+  deps: AiExecutorDeps,
+  args: ToolArgs,
+  w: number,
+  h: number,
+): { x: number; y: number } {
+  const { region, content } = layoutRegion(editor, deps);
+  let target: { x: number; y: number };
+  if (typeof args.x === 'number' && Number.isFinite(args.x) && typeof args.y === 'number' && Number.isFinite(args.y)) {
+    target = { x: args.x, y: args.y };
+  } else if (content) {
+    const side = typeof args.side === 'string' ? args.side : '';
+    target =
+      side === 'left'
+        ? { x: content.x - LAYOUT_GAP - w, y: content.y }
+        : side === 'right'
+          ? { x: content.x + content.w + LAYOUT_GAP, y: content.y }
+          : side === 'above'
+            ? { x: content.x, y: content.y - LAYOUT_GAP - h }
+            : { x: content.x + content.w / 2 - w / 2, y: content.y + content.h + LAYOUT_GAP };
+  } else {
+    // Nothing to anchor on: start near the top of the region (centered).
+    target = { x: region.x + region.w / 2 - w / 2, y: region.y + PAGE_INSET };
+  }
+  // Keep the block inside the region (centered if it simply does not fit).
+  const maxX = region.x + region.w - w - PAGE_INSET;
+  const maxY = region.y + region.h - h - PAGE_INSET;
+  return {
+    x: maxX < region.x + PAGE_INSET
+      ? region.x + (region.w - w) / 2
+      : clamp(target.x, region.x + PAGE_INSET, maxX),
+    y: maxY < region.y + PAGE_INSET
+      ? region.y + (region.h - h) / 2
+      : clamp(target.y, region.y + PAGE_INSET, maxY),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// shared helpers
+// ---------------------------------------------------------------------------
 
 const newShapeId = (): TLShapeId => `shape:${crypto.randomUUID()}` as TLShapeId;
 
@@ -163,58 +300,205 @@ function asScheme(value: ToolArgs['shape']): 'rect' | 'round' | 'diamond' | 'not
   return value === 'round' || value === 'diamond' || value === 'note' ? value : 'rect';
 }
 
+/** width arg → clamped size (must not be smaller than min). */
+function widthArg(args: ToolArgs, min: number, max: number, fallback: number): number {
+  const parsed = typeof args.width === 'number' && Number.isFinite(args.width) ? args.width : fallback;
+  return clamp(parsed, min, max);
+}
+
+/** Rough height estimates keep placement enough room; the shapes themselves
+ *  auto-fit their height to content after creation. */
+const textLines = (text: string) => text.split(/\r?\n/).length;
+
+/** Outline-friendly rounding for the geometry this module reports back. */
+const round = (value: number) => Math.round(value * 100) / 100;
+
 // ---------------------------------------------------------------------------
 // creates
 // ---------------------------------------------------------------------------
 
-function createNote(editor: Editor, args: ToolArgs): ToolValue {
+function createNote(deps: AiExecutorDeps, args: ToolArgs): ToolValue {
+  const editor = deps.editor;
   const text = requiredText(args);
-  const at = viewportPoint(editor, args.x, args.y);
+  const w = widthArg(args, 160, 1200, DEFAULT_NOTE_W);
+  const h = Math.max(64, textLines(text) * 30 + 30);
+  const at = planPlacement(editor, deps, args, w, h);
   const id = newShapeId();
   editor.run(() => {
     editor.createShape({
       id,
       type: 'note',
-      x: at.x - DEFAULT_NOTE_W / 2,
-      y: at.y - DEFAULT_NOTE_W / 2,
-      props: { richText: toRichText(text) },
+      x: at.x,
+      y: at.y,
+      props: { richText: buildRichDocument(text) as never },
     });
     // "Preferred width"(>120): notes resize through their scale prop.
-    if (typeof args.width === 'number' && args.width >= 120) {
-      const scale = Math.max(0.35, Math.min(4, args.width / DEFAULT_NOTE_W));
+    if (w !== DEFAULT_NOTE_W) {
+      const scale = Math.max(0.35, Math.min(4, w / DEFAULT_NOTE_W));
       editor.updateShape({ id, type: 'note', props: { scale } });
     }
   });
-  return { created: id };
+  return { created: id, x: round(at.x), y: round(at.y), w: round(w), h: round(h) };
 }
 
-async function createSvg(editor: Editor, args: ToolArgs): Promise<ToolValue> {
+function createMathBlock(deps: AiExecutorDeps, args: ToolArgs): ToolValue {
+  const editor = deps.editor;
+  const latex = requiredText(args, 'latex');
+  const w = widthArg(args, 160, 900, 320);
+  const lines = textLines(latex);
+  const h = lines > 1 ? Math.max(64, lines * 28 + 32) : 96;
+  const at = planPlacement(editor, deps, args, w, h);
+  const id = newShapeId();
+  editor.run(() => {
+    editor.createShape({
+      id,
+      type: 'math-block',
+      x: at.x,
+      y: at.y,
+      props: { w, h, latex },
+    });
+  });
+  return { created: id, x: round(at.x), y: round(at.y), w: round(w), h: round(h) };
+}
+
+function createCodeBlock(deps: AiExecutorDeps, args: ToolArgs): ToolValue {
+  const editor = deps.editor;
+  const code = requiredText(args, 'code');
+  const language =
+    typeof args.language === 'string' && (CODE_LANGUAGES as readonly string[]).includes(args.language)
+      ? (args.language as (typeof CODE_LANGUAGES)[number])
+      : 'typescript';
+  const w = widthArg(args, 320, 1400, 560);
+  // header 25 + body padding 24 + border 2 ≈ 51; ~20px per code line at 13px
+  const h = clamp(51 + textLines(code) * 21, 120, 2000);
+  const at = planPlacement(editor, deps, args, w, Math.min(h, 400));
+  const id = newShapeId();
+  editor.run(() => {
+    editor.createShape({
+      id,
+      type: 'code-block',
+      x: at.x,
+      y: at.y,
+      props: { w, h, code, language, fontSize: 13, autoHeight: true },
+    });
+  });
+  return { created: id, language, x: round(at.x), y: round(at.y), w: round(w), h: round(h) };
+}
+
+function createTable(deps: AiExecutorDeps, args: ToolArgs): ToolValue {
+  const editor = deps.editor;
+  const markdown = args.markdown;
+  if (typeof markdown !== 'string' || markdown.trim().length === 0) {
+    throw new Error('"markdown" is required: a GFM table (header row, | --- | delimiter row, rows)');
+  }
+  const parsed = parseMarkdownTable(markdown);
+  if (!parsed) {
+    throw new Error(
+      '"markdown" must be a GitHub-flavored table: header row, a | --- | delimiter row, then one row per line',
+    );
+  }
+  const cols = parsed.header.length;
+  const fallbackW = clamp(cols * 200, 360, 1000);
+  const w = widthArg(args, 240, 1400, fallbackW);
+  const rowCount = parsed.rows.length || 1;
+  const h = 60 + (rowCount + 1) * 46;
+  const at = planPlacement(editor, deps, args, w, h);
+  let id: TLShapeId | null = null;
+  editor.run(() => {
+    createTableFromMarkdown(editor, parsed, { x: at.x, y: at.y }, w);
+    const selected = editor.getSelectedShapeIds()[0];
+    if (selected) id = selected;
+  });
+  if (!id) throw new Error('the table block was not created');
+  return {
+    created: id,
+    x: round(at.x),
+    y: round(at.y),
+    w: round(w),
+    h: round(h),
+  };
+}
+
+const CARD_VARIANTS = new Set(['note', 'info', 'tip', 'success', 'warning', 'danger']);
+const CARD_ICONS = new Set([
+  'dot', 'info', 'tip', 'success', 'warning', 'danger', 'pin', 'star', 'bookmark', 'zap', 'help',
+]);
+const CARD_DEFAULT_ICON: Record<string, string> = {
+  note: 'dot',
+  info: 'info',
+  tip: 'tip',
+  success: 'success',
+  warning: 'warning',
+  danger: 'danger',
+};
+
+function createCard(deps: AiExecutorDeps, args: ToolArgs): ToolValue {
+  const editor = deps.editor;
+  const title = requiredText(args, 'title');
+  const body = typeof args.body === 'string' ? args.body : '';
+  const variant = typeof args.variant === 'string' && CARD_VARIANTS.has(args.variant) ? args.variant : 'note';
+  const badge = typeof args.badge === 'string' ? args.badge.trim() : '';
+  const icon =
+    typeof args.icon === 'string' && CARD_ICONS.has(args.icon)
+      ? args.icon
+      : (CARD_DEFAULT_ICON[variant] ?? 'dot');
+  const w = widthArg(args, 220, 1200, 460);
+  const h = clamp(textLines(body) * 26 + (badge ? 92 : 64), 64, 1200);
+  const at = planPlacement(editor, deps, args, w, Math.min(h, 320));
+  const id = newShapeId();
+  editor.run(() => {
+    editor.createShape({
+      id,
+      type: 'callout-card',
+      x: at.x,
+      y: at.y,
+      props: {
+        w,
+        h,
+        variant,
+        icon,
+        title: buildRichDocument(title) as never,
+        badge: buildRichDocument(badge) as never,
+        body: buildRichDocument(body) as never,
+        showIcon: true,
+        showBadge: Boolean(badge),
+        tinted: false,
+        collapsed: false,
+      },
+    });
+  });
+  return { created: id, variant, icon, x: round(at.x), y: round(at.y), w: round(w), h: round(h) };
+}
+
+async function createSvg(deps: AiExecutorDeps, args: ToolArgs): Promise<ToolValue> {
+  const editor = deps.editor;
   const svg = requiredText(args, 'svg');
   const name = typeof args.name === 'string' ? args.name : '';
   const prepared = prepareSvg(svg);
   if (!prepared) {
     throw new Error('invalid svg: needs a viewBox, or width and height');
   }
-  const at = viewportPoint(editor, args.x, args.y);
-  const w = typeof args.width === 'number' && args.width >= 120 ? args.width : 320;
+  const w = widthArg(args, 120, 2000, 320);
   const h = Math.round(w * prepared.ratio);
+  const at = planPlacement(editor, deps, args, w, h);
   const id = newShapeId();
   editor.run(() => {
     editor.createShape({
       id,
       type: 'svg-diagram',
-      x: at.x - w / 2,
-      y: at.y - h / 2,
+      x: at.x,
+      y: at.y,
       props: { svg: prepared.svg, ratio: prepared.ratio, draft: svg.trim(), h },
     });
   });
-  return { created: id, name: name || null, w, h };
+  return { created: id, name: name || null, x: round(at.x), y: round(at.y), w: round(w), h: round(h) };
 }
 
 /** tldraw geo values for the schema's simple node kinds. */
 const GEO_KINDS = { rect: 'rectangle', round: 'roundRectangle', diamond: 'diamond' } as const;
 
-function createDiagram(editor: Editor, args: ToolArgs): ToolValue {
+function createDiagram(deps: AiExecutorDeps, args: ToolArgs): ToolValue {
+  const editor = deps.editor;
   const rawNodes = asArray(args, 'nodes');
   const rawEdges = args.edges;
   if (!Array.isArray(rawEdges)) {
@@ -243,8 +527,8 @@ function createDiagram(editor: Editor, args: ToolArgs): ToolValue {
     throw new Error('nothing to create: the diagram is empty');
   }
 
-  // Center the finished bounding box on the current viewport (or the
-  // explicit x/y if the model gave one).
+  // The diagram's own bounding box feeds the same deterministic placement
+  // rule as every other block: below (or left/right/above of) the content.
   let minX = Infinity;
   let minY = Infinity;
   let maxX = -Infinity;
@@ -255,10 +539,11 @@ function createDiagram(editor: Editor, args: ToolArgs): ToolValue {
     maxX = Math.max(maxX, placement.x + placement.w);
     maxY = Math.max(maxY, placement.y + placement.h);
   }
-  const at = viewportPoint(editor, args.x, args.y);
-  const dx = at.x - (minX + maxX) / 2;
-  const dy = at.y - (minY + maxY) / 2;
-
+  const boxW = maxX - minX;
+  const boxH = maxY - minY;
+  const at = planPlacement(editor, deps, args, Math.min(boxW, 2000), Math.min(boxH, 2000));
+  const dx = at.x - minX;
+  const dy = at.y - minY;
   const createdNodes: TLShapeId[] = [];
   const createdArrows: TLShapeId[] = [];
   editor.run(() => {
@@ -323,6 +608,10 @@ function createDiagram(editor: Editor, args: ToolArgs): ToolValue {
   return {
     created: { nodes: createdNodes, arrows: createdArrows },
     shape_ids: createdNodes,
+    x: round(at.x),
+    y: round(at.y),
+    w: round(boxW),
+    h: round(boxH),
     warnings: layout.warnings,
   };
 }
@@ -365,6 +654,20 @@ function createShapes(editor: Editor, args: ToolArgs): ToolValue {
 // edits
 // ---------------------------------------------------------------------------
 
+/** Shape types whose geometry lives inside `props`. For these, top-level
+ *  `w`/`h` in an update entry are moved under `props` so the model never has
+ *  to remember where the size sits. */
+const BOX_PROP_TYPES = new Set([
+  'geo',
+  'frame',
+  'code-block',
+  'math-block',
+  'table',
+  'callout-card',
+  'svg-diagram',
+  'icon',
+]);
+
 function updateShapes(editor: Editor, args: ToolArgs): ToolValue {
   const entries = asArray(args, 'updates');
   const updated: string[] = [];
@@ -375,10 +678,22 @@ function updateShapes(editor: Editor, args: ToolArgs): ToolValue {
         if (typeof entry.id !== 'string' || !entry.id.startsWith('shape:')) {
           throw new Error('every update needs a shape "id"');
         }
-        if (!editor.getShape(entry.id as TLShapeId)) {
+        const shape = editor.getShape(entry.id as TLShapeId);
+        if (!shape) {
           throw new Error(`no shape with id ${entry.id} on the active page`);
         }
         const { id, ...patch } = entry;
+        // Convenience: for box-shaped blocks sizes live under `props`; a
+        // top-level w/h is moved there instead of being silently ignored.
+        if (
+          BOX_PROP_TYPES.has(shape.type) &&
+          !(patch.props && typeof patch.props === 'object') &&
+          ('w' in patch || 'h' in patch)
+        ) {
+          patch.props = { w: patch.w, h: patch.h } as ToolArgs;
+          delete patch.w;
+          delete patch.h;
+        }
         editor.updateShape({ id: id as TLShapeId, ...patch } as Parameters<Editor['updateShape']>[0]);
         updated.push(id);
       } catch (error) {

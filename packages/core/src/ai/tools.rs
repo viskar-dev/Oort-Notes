@@ -71,42 +71,62 @@ pub fn all_tools() -> Vec<ToolDef> {
     vec![
         def!(
             "get_canvas",
-            "Read the currently open canvas as a compact outline: every shape's id, type, text content and geometry. Call this before editing so you work with real shape ids.",
+            "Read the currently open canvas as a compact outline: every shape's id, type, text content, position and size. Code blocks include their language and code, math blocks their LaTeX, tables their markdown, cards their variant and text. Also reports pages-mode geometry (page size and sheet count). Call this before any edit so you work with real shape ids and real positions.",
             a::GetCanvasArgs, false, false, frontend
         ),
         def!(
             "get_selection",
-            "Read the shapes the user currently has selected on the canvas. Empty results mean nothing is selected.",
+            "Read the shapes the user currently has selected on the canvas. Empty results mean nothing is selected. Use it for 'tidy up what I selected' style requests.",
             a::GetSelectionArgs, false, false, frontend
         ),
         def!(
             "get_screenshot",
-            "Take a screenshot of the current canvas (or of the selection) as an image. Use it only when the text outline is not enough, e.g. for visual layout questions. Returns the image directly, not a file path.",
+            "Take a screenshot of the current canvas (or of the selection) as an image. Use it only when the text outline is not enough, e.g. for visual layout questions. If the client refuses large images, pass a small max_width such as 768 or 1024. Returns the image directly, not a file path.",
             a::ScreenshotArgs, false, false, frontend
         ),
         def!(
             "create_note",
-            "Create a note on the canvas: a box that shows the given text. Returns the new shape id. Prefer this for plain text blocks.",
+            "Create a note box whose text supports light markdown and $inline math$ / $$display math$$: paragraphs, '- ' bullets, '1. ' numbered lists, **bold**, *italic*, `code`. Returns the created shape with its final x/y/w/h — chain the next block from those. Without x/y the note is placed below existing content without overlap; with x/y it is honored exactly (top-left corner). Use side for left/right/above.",
             a::CreateNoteArgs, false, false, frontend
         ),
         def!(
+            "create_math_block",
+            "Create a rendered LaTeX equation block (KaTeX). Argument is \"latex\" — the LaTeX WITHOUT $ delimiters, e.g. \"E = mc^2\". Use it for standalone formulas; inline math inside note/card/table text needs no block. Returns the created shape with its final x/y/w/h.",
+            a::CreateMathBlockArgs, false, false, frontend
+        ),
+        def!(
+            "create_code_block",
+            "Create a syntax-highlighted code block (shiki). Argument is \"code\" (the source, verbatim) plus optional \"language\": typescript, javascript, rust, python, java, c, cpp, go, html, css, json, bash, sql, plain. Always use this for real code instead of putting code in a note. Returns the created shape with its final x/y/w/h.",
+            a::CreateCodeBlockArgs, false, false, frontend
+        ),
+        def!(
+            "create_table",
+            "Create a table. Argument is \"markdown\": a GitHub-flavored table (header row, --- delimiter row, rows); cells may contain $inline math$. Use it for any tabular data instead of approximating tables with notes. Returns the created shape with its final x/y/w/h.",
+            a::CreateTableArgs, false, false, frontend
+        ),
+        def!(
+            "create_card",
+            "Create a callout card: a titled accent-colored highlight box. Argument is \"title\" plus optional \"body\" (same light markdown as notes), \"variant\" (note/info/tip/success/warning/danger), \"icon\" (pin, star, zap…), \"badge\". Use it for warnings, tips, definitions, anything that must stand out. Returns the created shape with its final x/y/w/h.",
+            a::CreateCardArgs, false, false, frontend
+        ),
+        def!(
             "create_svg",
-            "Create a diagram block on the canvas that renders complete `<svg>` markup you provide. Keep the SVG self-contained (no external images or fonts). Returns the new shape id.",
+            "Create a diagram block on the canvas that renders complete `<svg>` markup you provide. Keep the SVG self-contained (no external images or fonts). Returns the created shape with its final x/y/w/h.",
             a::CreateSvgArgs, false, false, frontend
         ),
         def!(
             "create_diagram",
-            "Create a node/arrow flow diagram on the canvas from a structural description. Layers are laid out automatically. Returns the new shape id.",
+            "Create a node/arrow flow diagram from a structural description: nodes {id, label, shape ('rect'|'round'|'diamond'|'note')} and edges {from, to, label}. Layers are laid out automatically. Use it for flowcharts, pipelines, state machines, hierarchies. Returns all created ids with the diagram's x/y/w/h.",
             a::CreateDiagramArgs, false, false, frontend
         ),
         def!(
             "create_shapes",
-            "Create one or more tldraw shapes from partial shape objects ({\"type\": \"geo\"|\"text\"|\"arrow\"|..., \"x\":, \"y\":, \"props\": {...}}). Use only known shape types and props. Returns the created ids.",
+            "Create one or more basic tldraw shapes from partial shape objects ({\"type\": \"geo\"|\"text\"|\"note\"|\"arrow\"|\"line\"|\"frame\"|\"svg-diagram\", \"x\":, \"y\":, \"props\": {...}}); geo shapes need props with numeric w and h. Best for plain geometry and for frames that contain later blocks. Use the dedicated create_* tools for code, math, tables and cards.",
             a::CreateShapesArgs, false, false, frontend
         ),
         def!(
             "update_shapes",
-            "Partially update existing shapes by id: each update entry is {\"id\": \"...\", ...partial shape or props}. Never lists ids you did not receive from a tool result.",
+            "Partially update existing shapes by id: each update entry carries \"id\", x/y at the top level and content under \"props\"; for box-type blocks (code-block, math-block, table, callout-card, geo, frame, svg-diagram) a top-level w/h is moved under props for you. Cards keep title/badge/body as rich-text props — prefer deleting and recreating a card to rewriting it. Never invent ids: only update ids a tool returned.",
             a::UpdateShapesArgs, false, false, frontend
         ),
         def!(
