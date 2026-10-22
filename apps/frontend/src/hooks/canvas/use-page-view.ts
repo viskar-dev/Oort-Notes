@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Editor } from 'tldraw';
 import { exportChapterToPdf } from '@/features/canvas/export-pdf';
+import { useExportStore } from '@/stores/export-store';
+import { useViewModeStore } from '@/stores/view-mode-store';
 import { SHEET_GAP, type FitMode } from '@/hooks/canvas/use-chapter-canvas';
 import type { Chapter, Topic } from '@/lib/ipc';
 import { errorText } from '@/lib/utils';
@@ -47,6 +49,18 @@ export function usePageView({
     setViewMode((open) => !open);
   }, [isPageChapter]);
 
+  // the ⋮ menu's Preferences submenu reads view mode through its store
+  // (menu components mount inside the editor without chapter props)
+  const setViewModeContext = useViewModeStore((s) => s.setContext);
+  useEffect(() => {
+    if (!isPageChapter) {
+      setViewModeContext(null);
+      return;
+    }
+    setViewModeContext({ on: viewMode, toggle: toggleViewMode });
+    return () => setViewModeContext(null);
+  }, [setViewModeContext, isPageChapter, viewMode, toggleViewMode]);
+
   // enter/exit view mode: readonly + page fit. Deliberately depends on
   // nothing but the mode: a re-run mid-view would toggle readonly and refit
   // the camera on every unrelated render (a flicker feedback loop)
@@ -89,7 +103,9 @@ export function usePageView({
     return () => window.removeEventListener('keydown', onKey);
   }, [isPageChapter, viewMode, goToSheet]);
 
-  // PDF export: the open topic's sheet stack, one PDF page per sheet
+  // PDF export: the open topic's sheet stack, one PDF page per sheet. The
+  // ⋮ menu's and right-click menu's "Export as" → PDF rows go through here;
+  // errors surface through the same canvas toast as before.
   const handleExportPdf = useCallback(() => {
     const editor = getEditor();
     if (!editor || !isPageChapter || !chapter.page_width || !chapter.page_height) return;
@@ -105,6 +121,22 @@ export function usePageView({
       .catch((e) => setExportError(errorText(e)))
       .finally(() => setExporting(false));
   }, [getEditor, isPageChapter, chapter.page_width, chapter.page_height, chapter.name, activePageCount, activeTopic]);
+
+  // tldraw's menu components mount inside the editor with no chapter props,
+  // so the export capability travels through the export store (the PDF rows
+  // tldraw's "Export as" submenus read it from there)
+  const setExportContext = useExportStore((s) => s.setContext);
+  const setStoreBusy = useExportStore((s) => s.setBusy);
+  useEffect(() => {
+    const supported = isPageChapter && !!chapter.page_width && !!chapter.page_height;
+    if (!supported) {
+      setExportContext(null);
+      return;
+    }
+    setExportContext({ enabled: true, run: handleExportPdf });
+    return () => setExportContext(null);
+  }, [setExportContext, handleExportPdf, isPageChapter, chapter.page_width, chapter.page_height]);
+  useEffect(() => setStoreBusy(exporting), [setStoreBusy, exporting]);
 
   // the sheet centers itself in whatever area it has: observe the canvas
   // area's size so sidebar toggles, window resizes and layout shifts all
