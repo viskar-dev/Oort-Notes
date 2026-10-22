@@ -1,18 +1,14 @@
-import { ChevronLeft, ChevronRight, Download, Eye, Plus, Settings } from 'lucide-react';import type { RefObject } from 'react';
+import { ChevronLeft, ChevronRight, Plus, Settings } from 'lucide-react';
+import type { RefObject } from 'react';
 
+/** Page-chapter actions at the top-right: page pager + settings (View mode
+ *  moved into the ⋮ menu's Preferences submenu, Ctrl+Alt+V). */
 interface PageControlsProps {
   index: number;
   count: number;
   onPrev: () => void;
   onNext: () => void;
   onAdd: () => void;
-}
-
-/** Page-chapter actions at the top-right: PDF export + chrome-less view. */
-export interface PageActionsProps {
-  onExportPdf: () => void;
-  exporting: boolean;
-  onToggleView: () => void;
 }
 
 interface CanvasTopBarProps {
@@ -23,8 +19,9 @@ interface CanvasTopBarProps {
   mainMenuSlotRef: RefObject<HTMLDivElement | null>;
   /** PDF-viewer controls, only rendered for multi-page topics. */
   pageControls: PageControlsProps | null;
-  /** Export/View actions, only rendered for page chapters with sheets. */
-  pageActions: PageActionsProps | null;
+  /** The floating header strip (name / topic / ⋮) lives on page chapters
+   *  only; infinite canvases get just Back + Settings chips top-right. */
+  strip?: boolean;
   onOpenSettings: () => void;
   /** Leave the canvas, back to the chapter list in its notebook. */
   onBack: () => void;
@@ -35,13 +32,39 @@ export function CanvasTopBar({
   pageMenuSlotRef,
   mainMenuSlotRef,
   pageControls,
-  pageActions,
+  strip = true,
   onOpenSettings,
   onBack,
 }: CanvasTopBarProps) {
+  /* Infinite canvases: no header at all — just floating Back + Settings
+     chips so navigation and the settings card stay reachable. */
+  if (!strip) {
+    return (
+      <div className="pointer-events-none absolute inset-0 top-0 z-40 flex h-10 items-center justify-between p-2">
+        <button
+          title="Back to chapters"
+          data-testid="topbar.back"
+          onClick={onBack}
+          className="pointer-events-auto rounded-md bg-surface p-1.5 text-muted-foreground transition-colors hover:bg-raised hover:text-foreground"
+        >
+          <ChevronLeft className="h-4 w-4" />
+        </button>
+        <button
+          title="Settings"
+          data-settings-toggle
+          onClick={onOpenSettings}
+          className="pointer-events-auto rounded-md bg-surface p-1.5 text-muted-foreground transition-colors hover:bg-raised hover:text-foreground"
+        >
+          <Settings size={16} />
+        </button>
+      </div>
+    );
+  }
   return (
-    <header className="flex h-12 shrink-0 items-center justify-between border-b border-line bg-surface px-4">
-      <div className="flex min-w-0 items-center gap-1.5 text-sm">
+    /* page chapters: a real header bar — solid background, own row in the
+       flex column so the canvas starts below it */
+    <header className="z-40 flex h-10 shrink-0 items-center justify-between border-b border-line bg-surface p-2">
+      <div className="flex min-w-0 items-center gap-1.5 text-sm px-2">
         <button
           title="Back to chapters"
           data-testid="topbar.back"
@@ -50,48 +73,26 @@ export function CanvasTopBar({
         >
           <ChevronLeft className="h-4 w-4" />
         </button>
-        <span className="truncate text-ink">{chapterName}</span>
+        <span className="truncate text-sm font-bold text-ink">{chapterName}</span>
         <span className="text-faint">/</span>
         {/* tldraw's native page menu trigger (page list) lands here */}
         <div ref={pageMenuSlotRef} className="flex min-w-0 items-center" />
-        {/* tldraw's native main menu trigger (⋮) lands here */}
+        {/* tldraw's native main menu trigger (⋮) lands here — keeps its own pill bg */}
         <div ref={mainMenuSlotRef} className="flex items-center" />
       </div>
+
       <div className="flex shrink-0 items-center gap-3">
-        {pageActions && (
-          <div className="flex items-center gap-1">
-            <button
-              title="Export this topic as PDF"
-              data-testid="topbar.export-pdf"
-              onClick={pageActions.onExportPdf}
-              disabled={pageActions.exporting}
-              className="flex items-center gap-1.5 rounded-lg border border-line px-2.5 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-raised hover:text-foreground disabled:opacity-40"
-            >
-              <Download className="h-4 w-4" />
-              {pageActions.exporting ? 'Exporting…' : 'Export PDF'}
-            </button>
-            <button
-              title="View mode — just the notes, arrow keys to flip pages (Esc exits)"
-              data-testid="topbar.view"
-              onClick={pageActions.onToggleView}
-              className="flex items-center gap-1.5 rounded-lg border border-line px-2.5 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-raised hover:text-foreground"
-            >
-              <Eye className="h-4 w-4" />
-              View
-            </button>
-          </div>
-        )}
         {pageControls && (
-          <div className="flex items-center gap-0.5 rounded-lg border border-line bg-surface px-1 py-0.5">
+          <div className="flex items-center gap-0.5 rounded-lg border border-line bg-raised px-1 py-0.5">
             <button
               title="Previous page"
               onClick={pageControls.onPrev}
               disabled={pageControls.index === 0}
               className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-raised hover:text-foreground disabled:opacity-30 disabled:hover:bg-transparent"
             >
-              <ChevronLeft className="h-4 w-4" />
+              <ChevronLeft className="h-3 w-3" />
             </button>
-            <span className="min-w-10 text-center text-sm tabular-nums text-ink">
+            <span className="min-w-10 text-center text-xs tabular-nums text-ink">
               {pageControls.index + 1} / {pageControls.count}
             </span>
             <button
@@ -100,7 +101,7 @@ export function CanvasTopBar({
               disabled={pageControls.index >= pageControls.count - 1}
               className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-raised hover:text-foreground disabled:opacity-30 disabled:hover:bg-transparent"
             >
-              <ChevronRight className="h-4 w-4" />
+              <ChevronRight className="h-3 w-3" />
             </button>
             <button
               title="Add page"
@@ -116,9 +117,9 @@ export function CanvasTopBar({
           title="Settings"
           data-settings-toggle
           onClick={onOpenSettings}
-          className="text-muted-foreground transition-colors hover:text-foreground"
+          className="flex items-center rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-raised hover:text-foreground"
         >
-          <Settings />
+          <Settings size={16} />
         </button>
       </div>
     </header>

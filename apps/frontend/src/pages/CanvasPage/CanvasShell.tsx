@@ -145,6 +145,28 @@ export function CanvasShell({ notebook, chapter }: { notebook: Notebook; chapter
     return () => window.removeEventListener('keydown', onKey, true);
   }, [getEditor, pageView.viewMode, settingsOpen]);
 
+  // page view mode: page chapters only. Capture phase +
+  // stopPropagation so tldraw never sees it; typing contexts stay untouched,
+  // and the combo also works while IN view mode (whose header is hidden) to
+  // exit back — mirrors the Icon finder handler above, including the
+  // AltGr-safe `e.code` match.
+  useEffect(() => {
+    if (!isPageChapter) return;
+    const onKey = (e: KeyboardEvent) => {
+      const isV = e.code === 'KeyV' || e.key.toLowerCase() === 'v';
+      if (!isV || !(e.ctrlKey || e.metaKey) || !e.altKey || e.shiftKey) return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
+      const ed = getEditor();
+      if (!ed || (!pageView.viewMode && (settingsOpen || ed.getEditingShapeId()))) return;
+      e.preventDefault();
+      e.stopPropagation();
+      pageView.toggleViewMode();
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [isPageChapter, getEditor, pageView.viewMode, pageView.toggleViewMode, settingsOpen]);
+
   function handlePaddingChange(value: number) {
     const clamped = Math.min(Math.max(Math.round(value) || 0, 0), 200);
     setPagePadding(clamped);
@@ -162,13 +184,16 @@ export function CanvasShell({ notebook, chapter }: { notebook: Notebook; chapter
 
   return (
     <>
-      <div className="flex h-dvh w-full flex-col overflow-hidden bg-canvas">
+        <div className="relative flex h-dvh w-full flex-col overflow-hidden bg-canvas">
         <IconFinder open={iconsOpen} onClose={() => useIconFinderStore.getState().setOpen(false)} />
         {!pageView.viewMode && (
           <CanvasTopBar
             chapterName={chapter.name}
             pageMenuSlotRef={ui.pageMenuSlotRef}
             mainMenuSlotRef={ui.mainMenuSlotRef}
+            /* header strip (name / topic / ⋮) only on page chapters —
+               infinite canvases stay clean, keeping Back + Settings chips */
+            strip={isPageChapter}
             pageControls={
               isPageChapter && activePages.length > 0
                 ? {
@@ -177,15 +202,6 @@ export function CanvasShell({ notebook, chapter }: { notebook: Notebook; chapter
                     onPrev: () => goToSheet(activePageIndex - 1),
                     onNext: () => goToSheet(activePageIndex + 1),
                     onAdd: addSheet,
-                  }
-                : null
-            }
-            pageActions={
-              isPageChapter && activePages.length > 0
-                ? {
-                    onExportPdf: pageView.handleExportPdf,
-                    exporting: pageView.exporting,
-                    onToggleView: pageView.toggleViewMode,
                   }
                 : null
             }
@@ -207,7 +223,10 @@ export function CanvasShell({ notebook, chapter }: { notebook: Notebook; chapter
           )}
 
           <ViewModeContext.Provider value={pageView.viewMode}>
-            <div className="oort-editor absolute inset-0">
+            {/* chapter-type class lets CSS tune the canvas backdrop: infinite
+                canvases read the same dimmed tone the page-stack bands
+                produce around page sheets, so both look alike */}
+            <div className={`oort-editor absolute inset-0 ${isPageChapter ? 'oort-pages' : 'oort-infinite'}`}>
               <ZoomSlotContext.Provider value={ui.zoomSlot}>
                 <Tldraw
                   tools={[ComponentsTool]}

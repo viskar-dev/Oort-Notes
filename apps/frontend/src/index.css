@@ -100,6 +100,13 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+/* infinite canvases sit on the same tone the page-stack dim bands
+   (rgba(5,5,6,0.93) over #060608 = #050506) produce around page sheets,
+   so topic and page chapters read as one backdrop */
+.oort-editor.oort-infinite .tl-theme__dark {
+  --color-background: #050506;
+}
+
 .oort-editor .tl-theme__dark {
   /* canvas */
   --color-background: #060608;
