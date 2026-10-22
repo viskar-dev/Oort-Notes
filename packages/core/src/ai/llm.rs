@@ -451,3 +451,51 @@ pub async fn run_agent(
     )));
     Ok(events)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fenced_json_array_is_parsed() {
+        let text = "Here you go:\n```json\n[{\"name\":\"create_note\",\"arguments\":{\"text\":\"hi\"}}]\n```\nLet me know how it looks.";
+        let calls = fallback_tool_calls(text);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].function.name, "create_note");
+        assert_eq!(calls[0].function.arguments, "{\"text\":\"hi\"}");
+        assert!(calls[0].id.starts_with("fallback-"));
+    }
+
+    #[test]
+    fn plain_fence_and_string_arguments_are_parsed() {
+        let text = "```[{\"tool\": \"list_canvases\", \"args\": \"{}\"}]```";
+        let calls = fallback_tool_calls(text);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].function.name, "list_canvases");
+        assert_eq!(calls[0].function.arguments, "{}");
+    }
+
+    #[test]
+    fn entry_without_arguments_gets_empty_object() {
+        let calls = fallback_tool_calls("[{\"name\":\"get_selection\"}]");
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].function.arguments, "{}");
+    }
+
+    #[test]
+    fn object_arguments_are_serialized() {
+        let calls = fallback_tool_calls("[{\"name\":\"create_shapes\",\"arguments\":{\"shapes\":[1]}}]");
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].function.arguments, "{\"shapes\":[1]}");
+    }
+
+    #[test]
+    fn plain_replies_are_ignored() {
+        // Normal prose must never become a tool call.
+        assert!(fallback_tool_calls("I created the note. Want anything else?").is_empty());
+        // Bracketed prose without valid JSON is ignored, not half-parsed.
+        assert!(fallback_tool_calls("see [1] and [2] for references").is_empty());
+        // Empty array: no calls, but not an error either.
+        assert!(fallback_tool_calls("```json\n[]\n```").is_empty());
+    }
+}
