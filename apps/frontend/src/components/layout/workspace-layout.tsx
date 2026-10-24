@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { Search, Settings } from 'lucide-react';
+import { isTauri } from '@tauri-apps/api/core';
 import { WindowControls } from '@/components/layout/window-controls';
 
 /** Shared width rhythm for the wide inner pages (chapters, settings). */
@@ -86,8 +87,14 @@ export function WorkspaceLayout({
   return (
     <div className="nb-root flex min-h-screen flex-col">
       <header className="sticky top-0 z-20 border-b border-white/[0.06] bg-bg/60 backdrop-blur-md">
-        <div className={`${container} flex h-14 items-center justify-between`}>
-          <div className="flex min-w-0 items-center gap-1.5">
+        {/* full-bleed row: the page content keeps the centered container
+            rhythm (left spacer mirrors the controls cell so the column stays
+            optically centered), while the window controls own the true
+            right-hand corner of the window at every width. */}
+        <div className="flex items-stretch">
+          {isTauri() && <div aria-hidden className="hidden h-14 w-[108px] shrink-0 sm:block" />}
+          <div className={`${container} flex h-14 min-w-0 flex-1 items-center justify-between`}>
+            <div className="flex min-w-0 items-center gap-1.5">
             <Link
               to="/"
               title="Back to notebooks"
@@ -176,10 +183,17 @@ export function WorkspaceLayout({
             >
               <Settings className="h-4 w-4" strokeWidth={1.5} />
             </Link>
-            {/* undecorated desktop window: minimize / maximize / close pinned
-                at the top-right corner, next to the other header options */}
-            <WindowControls className="ml-1.5 border-l border-white/[0.08] pl-2.5" />
           </div>
+          </div>
+          {/* undecorated desktop window: minimize / maximize / close pinned
+              to the true right edge, vertically centered in the navbar band;
+              the cluster above never slides under it (flex sizing). The cell
+              (and its left mirror) exists only in the desktop build. */}
+          {isTauri() && (
+            <div className="flex h-14 w-[108px] shrink-0 items-center justify-center border-l border-white/[0.06]">
+              <WindowControls />
+            </div>
+          )}
         </div>
       </header>
 

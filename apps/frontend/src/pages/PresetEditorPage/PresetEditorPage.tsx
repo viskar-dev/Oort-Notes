@@ -1,5 +1,6 @@
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft } from 'lucide-react';
+import { isTauri } from '@tauri-apps/api/core';
 import { WindowControls } from '@/components/layout/window-controls';
 import { PresetToolbarTab } from '@/components/global/presets/PresetToolbarTab';
 import { PresetColorsTab } from '@/components/global/presets/PresetColorsTab';
@@ -20,7 +21,19 @@ export function PresetEditorPage() {
 
   return (
     <div className="min-h-screen bg-background text-ink">
-      <div className="mx-auto max-w-[1100px] px-10 py-8">
+      {/* undecorated desktop window: minimize / maximize / close live at the
+          true top-right corner; the centered column reserves room below xl
+          (desktop build only — the browser has no window to control) */}
+      {isTauri() && (
+        <div className="fixed right-0 top-0 z-20 flex h-12 items-center border-l border-line bg-background/80 pl-1.5 pr-3 backdrop-blur-sm">
+          <WindowControls />
+        </div>
+      )}
+      <div
+        className={`mx-auto max-w-[1100px] py-8 pl-10 ${
+          isTauri() ? 'pr-[112px] xl:px-10' : 'pr-10'
+        }`}
+      >
         {/* breadcrumb */}
         <div className="mb-4 flex items-center gap-1.5 text-sm text-muted-foreground">
           <Link to="/settings" className="transition-colors hover:text-ink">
@@ -64,7 +77,6 @@ export function PresetEditorPage() {
             >
               {editor.saving ? 'Saving…' : editor.isNew ? 'Create preset' : 'Save preset'}
             </button>
-            <WindowControls className="ml-1.5 border-l border-line pl-2.5" />
           </div>
         </header>
 
