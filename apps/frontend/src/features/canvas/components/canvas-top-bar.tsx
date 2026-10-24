@@ -1,5 +1,6 @@
 import { ChevronLeft, ChevronRight, Plus, Settings, Sparkles } from 'lucide-react';
 import type { RefObject } from 'react';
+import { WindowControls } from '@/components/layout/window-controls';
 
 /** Page-chapter actions at the top-right: page pager + settings (View mode
  *  moved into the ⋮ menu's Preferences submenu, Ctrl+Alt+V). */
@@ -44,15 +45,18 @@ export function CanvasTopBar({
   if (!strip) {
     return (
       <div className="pointer-events-none absolute inset-0 top-0 z-40 flex h-10 items-center justify-between p-2">
+        {/* Undecorated window needs some always-hittable strip for
+            dragging/maximizing; chips below stay reachable on top of it. */}
+        <div data-tauri-drag-region className="pointer-events-auto absolute inset-x-0 top-0 h-10" />
         <button
           title="Back to chapters"
           data-testid="topbar.back"
           onClick={onBack}
-          className="pointer-events-auto rounded-md bg-surface p-1.5 text-muted-foreground transition-colors hover:bg-raised hover:text-foreground"
+          className="pointer-events-auto relative rounded-md bg-surface p-1.5 text-muted-foreground transition-colors hover:bg-raised hover:text-foreground"
         >
           <ChevronLeft className="h-4 w-4" />
         </button>
-        <div className="pointer-events-auto flex items-center gap-1">
+        <div className="pointer-events-auto relative flex items-center gap-1">
           {onOpenAi && (
             <button
               title="AI assistant (Ctrl+Alt+A)"
@@ -70,15 +74,24 @@ export function CanvasTopBar({
           >
             <Settings size={16} />
           </button>
+          <WindowControls />
         </div>
       </div>
     );
   }
   return (
     /* page chapters: a real header bar — solid background, own row in the
-       flex column so the canvas starts below it */
-    <header className="z-40 flex h-10 shrink-0 items-center justify-between border-b border-line bg-surface p-2">
-      <div className="flex min-w-0 items-center gap-1.5 text-sm px-2">
+       flex column so the canvas starts below it. `data-tauri-drag-region`
+       restores window dragging for the undecorated window; it only applies
+       to the element it is on, so the embedded buttons stay clickable. */
+    <header
+      data-tauri-drag-region
+      className="z-40 flex h-10 shrink-0 items-center justify-between border-b border-line bg-surface p-2"
+    >
+      <div
+        data-tauri-drag-region
+        className="flex min-w-0 items-center gap-1.5 text-sm px-2"
+      >
         <button
           title="Back to chapters"
           data-testid="topbar.back"
@@ -87,15 +100,18 @@ export function CanvasTopBar({
         >
           <ChevronLeft className="h-4 w-4" />
         </button>
-        <span className="truncate text-sm font-bold text-ink">{chapterName}</span>
-        <span className="text-faint">/</span>
+        <span data-tauri-drag-region className="truncate text-sm font-bold text-ink">{chapterName}</span>
+        <span data-tauri-drag-region className="text-faint">/</span>
         {/* tldraw's native page menu trigger (page list) lands here */}
         <div ref={pageMenuSlotRef} className="flex min-w-0 items-center" />
         {/* tldraw's native main menu trigger (⋮) lands here — keeps its own pill bg */}
         <div ref={mainMenuSlotRef} className="flex items-center" />
       </div>
 
-      <div className="flex shrink-0 items-center gap-3">
+      <div
+        data-tauri-drag-region
+        className="flex shrink-0 items-center gap-3"
+      >
         <div className="flex shrink-0 items-center gap-1.5">
           {pageControls && (
             <div className="flex items-center gap-0.5 rounded-lg border border-line bg-raised px-1 py-0.5">
@@ -147,6 +163,9 @@ export function CanvasTopBar({
             <Settings size={16} />
           </button>
         </div>
+
+        {/* titled chrome: minimize / maximize / close at the very edge */}
+        <WindowControls className="ml-1.5 border-l border-line pl-2" />
       </div>
     </header>
   );
