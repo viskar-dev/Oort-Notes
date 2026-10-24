@@ -25,7 +25,10 @@ export function PresetEditorPage() {
           true top-right corner; the centered column reserves room below xl
           (desktop build only — the browser has no window to control) */}
       {isTauri() && (
-        <div className="fixed right-0 top-0 z-20 flex h-12 items-center border-l border-line bg-background/80 pl-1.5 pr-3 backdrop-blur-sm">
+        <div
+          data-tauri-drag-region
+          className="fixed right-0 top-0 z-20 flex h-12 items-center border-l border-line bg-background/80 pl-1.5 pr-3 backdrop-blur-sm"
+        >
           <WindowControls />
         </div>
       )}
@@ -34,8 +37,11 @@ export function PresetEditorPage() {
           isTauri() ? 'pr-[112px] xl:px-10' : 'pr-10'
         }`}
       >
-        {/* breadcrumb */}
-        <div className="mb-4 flex items-center gap-1.5 text-sm text-muted-foreground">
+        {/* breadcrumb (its empty stretch drags the undecorated window) */}
+        <div
+          data-tauri-drag-region
+          className="mb-4 flex items-center gap-1.5 text-sm text-muted-foreground"
+        >
           <Link to="/settings" className="transition-colors hover:text-ink">
             Settings
           </Link>
@@ -47,7 +53,10 @@ export function PresetEditorPage() {
           <span className="font-medium text-ink">{editor.name || 'Untitled'}</span>
         </div>
 
-        <header className="mb-6 flex items-center justify-between">
+        <header
+          data-tauri-drag-region
+          className="mb-6 flex items-center justify-between"
+        >
           <div className="flex items-center gap-3">
             <button
               onClick={() => navigate('/settings')}

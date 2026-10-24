@@ -91,10 +91,19 @@ export function WorkspaceLayout({
             rhythm (left spacer mirrors the controls cell so the column stays
             optically centered), while the window controls own the true
             right-hand corner of the window at every width. */}
-        <div className="flex items-stretch">
-          {isTauri() && <div aria-hidden className="hidden h-14 w-[108px] shrink-0 sm:block" />}
-          <div className={`${container} flex h-14 min-w-0 flex-1 items-center justify-between`}>
-            <div className="flex min-w-0 items-center gap-1.5">
+        <div data-tauri-drag-region className="flex items-stretch">
+          {isTauri() && (
+            <div
+              aria-hidden
+              data-tauri-drag-region
+              className="hidden h-14 w-[108px] shrink-0 sm:block"
+            />
+          )}
+          <div
+            data-tauri-drag-region
+            className={`${container} flex h-14 min-w-0 flex-1 items-center justify-between`}
+          >
+            <div data-tauri-drag-region className="flex min-w-0 items-center gap-1.5">
             <Link
               to="/"
               title="Back to notebooks"
@@ -128,13 +137,15 @@ export function WorkspaceLayout({
                       {crumb.label}
                     </Link>
                   ) : (
-                    <span className="truncate text-sm text-fg-1">{crumb.label}</span>
+                    <span data-tauri-drag-region className="truncate text-sm text-fg-1">
+                      {crumb.label}
+                    </span>
                   )}
                 </span>
               ))}
           </div>
 
-          <div className="flex items-center gap-2">
+          <div data-tauri-drag-region className="flex items-center gap-2">
             {search && (searchOpen || search.value.trim() !== '') ? (
               <div className="relative h-9 w-64 rounded-lg border border-white/[0.08] bg-white/[0.03] transition-colors duration-150 focus-within:border-white/[0.12]">
                 <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-fg-3" />
