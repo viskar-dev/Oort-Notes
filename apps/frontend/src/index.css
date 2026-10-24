@@ -2,6 +2,7 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 @import "@fontsource-variable/geist";
+@import "@fontsource-variable/inter";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -16,21 +17,55 @@
   --color-canvas: #060608;     /* editor background (bg) */
   --color-line: #24232c;       /* borders */
   --color-accent-strong: #7c6ee6;
+
+  /* 2026 chrome tokens (notebooks home design spec). "iris" is the spec's
+     accent color; the name `accent` itself is owned by the shadcn mapping
+     below, so the token lives under its own key to keep dropdowns/selects
+     painting identically app-wide. */
+  --color-bg: #09090b;
+  --color-fg-1: #f2f2f3;
+  --color-fg-2: #a1a1a6;
+  --color-fg-3: #6b6b70;
+  --color-ok: #4ade80;
+  --color-iris: #7c7cf8;
+
+  /* the two allowed shadows + the one allowed easing curve */
+  --shadow-focus: 0 0 0 2px #09090b, 0 0 0 4px rgba(124, 124, 248, 0.4);
+  --shadow-dot: 0 0 0 3px rgba(74, 222, 128, 0.15);
+  --ease-out: cubic-bezier(0.32, 0.72, 0, 1);
 }
 
 
 
+/* thin scrollbars: 4px, transparent track, thumb appears on container hover */
 * {
-  scrollbar-width: none;
+  scrollbar-width: thin;
   -ms-overflow-style: none;
+  scrollbar-color: transparent transparent;
+}
+
+*:hover {
+  scrollbar-color: rgba(255, 255, 255, 0.12) transparent;
 }
 
 *::-webkit-scrollbar {
-  display: none;
-  width: 0;
-  height: 0;
+  width: 4px;
+  height: 4px;
 }
 
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: 9999px;
+}
+
+*:hover::-webkit-scrollbar-thumb,
+*:focus-within::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
+}
 
 html,
 body,
@@ -39,13 +74,78 @@ body,
   overflow: auto;
 }
 
-body {
+/* the page's single allowed gradient: a soft accent glow behind the chrome.
+   Negative z-index keeps it above the propagated body background but under
+   every content layer. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background: radial-gradient(640px 420px at 50% -120px, rgba(124, 124, 248, 0.08), transparent 70%);
+}
 
+body {
   margin: 0;
-  background: var(--color-canvas);
-  color: var(--color-ink);
+  background: var(--color-bg);
+  color: var(--color-fg-1);
   font-family: var(--font-sans);
+  font-feature-settings: "cv11", "ss01";
   -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  background: rgba(124, 124, 248, 0.25);
+}
+
+:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px #09090b, 0 0 0 4px rgba(124, 124, 248, 0.4);
+}
+
+/* text fields are focused for typing, not activation — they never show the
+   chrome ring (their wrappers communicate focus through borders/fills) */
+input:focus-visible,
+textarea:focus-visible,
+[contenteditable]:focus-visible {
+  box-shadow: none;
+}
+
+/* the editor draws its own focus visuals; the chrome ring stays off-canvas */
+.oort-editor :focus-visible,
+.oort-editor:focus-visible,
+.tl-container :focus-visible,
+.tl-container:focus-visible {
+  box-shadow: none;
+}
+
+/* list dividers that fade at both ends, instead of border-b */
+.hairline {
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.07), transparent);
+}
+
+/* page-enter motion (staggered per section via inline animationDelay) */
+@keyframes fadeUp {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }
 
 /* tldraw editor: Oort theme on top of its dark theme. The floating UI
@@ -139,7 +239,7 @@ body {
 
 @theme inline {
   --font-heading: var(--font-sans);
-  --font-sans: 'Geist Variable', sans-serif;
+  --font-sans: 'Inter Variable', 'Geist Variable', system-ui, sans-serif;
   --color-chart-5: var(--chart-5);
   --color-chart-4: var(--chart-4);
   --color-chart-3: var(--chart-3);
@@ -244,33 +344,7 @@ body {
   display: none !important;
 }
 
-/* ================= Notebook home (settings tokens per design spec) ===== */
-/* Note: only tokens that don't collide with the shadcn theme live here.
-   The purple accent simply reuses the shadcn `--primary` token. */
-:root {
-  --text: #f4f4f6;        /* primary text */
-  --text-2: #a09fab;      /* secondary text */
-  --text-3: #8b8a96;      /* faint text */
-  --spine: #1b1a21;       /* book spine base */
-}
-
-.nb-cover {
-  background-image: linear-gradient(
-    135deg,
-    rgba(255, 255, 255, 0.14) 0%,
-    rgba(255, 255, 255, 0.03) 45%,
-    rgba(0, 0, 0, 0.3) 100%
-  );
-}
-.nb-cover:hover {
-  transform: translateY(-2px);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.08),
-    0 4px 8px rgba(0, 0, 0, 0.3),
-    0 16px 32px rgba(0, 0, 0, 0.45);
-}
-
-/* ---- math (KaTeX) ------------------------------------------------- */
+/* ================= math (KaTeX) --------------------------------------- */
 /* inline formulas inside tldraw rich text never wrap mid-formula */
 .tl-math {
   white-space: nowrap;
