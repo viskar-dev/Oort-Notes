@@ -1,5 +1,6 @@
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft } from 'lucide-react';
+import { WindowControls } from '@/components/layout/window-controls';
 import { PresetToolbarTab } from '@/components/global/presets/PresetToolbarTab';
 import { PresetColorsTab } from '@/components/global/presets/PresetColorsTab';
 import { PresetFontsTab } from '@/components/global/presets/PresetFontsTab';
@@ -63,6 +64,7 @@ export function PresetEditorPage() {
             >
               {editor.saving ? 'Saving…' : editor.isNew ? 'Create preset' : 'Save preset'}
             </button>
+            <WindowControls className="ml-1.5 border-l border-line pl-2.5" />
           </div>
         </header>
 

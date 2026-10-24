@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { Search, Settings } from 'lucide-react';
+import { WindowControls } from '@/components/layout/window-controls';
 
 /** Shared width rhythm for the wide inner pages (chapters, settings). */
 export const APP_CONTAINER = 'mx-auto w-full max-w-7xl px-6 lg:px-8';
@@ -144,7 +145,7 @@ export function WorkspaceLayout({
                   aria-label={search.placeholder}
                   className="h-full w-full rounded-lg bg-transparent pl-9 pr-16 text-sm text-fg-1 outline-none placeholder:text-fg-3"
                 />
-                <kbd className="pointer-events-none absolute right-2 top-1/2 flex h-5 -translate-y-1/2 items-center rounded border border-white/[0.08] px-1.5 font-sans text-[11px] text-fg-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
+                <kbd className="pointer-events-none absolute right-2 top-1/2 hidden h-5 -translate-y-1/2 items-center rounded border border-white/[0.08] px-1.5 font-sans text-[11px] text-fg-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] sm:flex">
                   {isMac() ? '⌘ K' : 'Ctrl K'}
                 </kbd>
               </div>
@@ -162,12 +163,12 @@ export function WorkspaceLayout({
                 >
                   <Search className="h-4 w-4" strokeWidth={1.5} />
                 </button>
-                <kbd className="flex h-5 items-center rounded border border-white/[0.08] px-1.5 font-sans text-[11px] text-fg-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
+                <kbd className="hidden h-5 items-center rounded border border-white/[0.08] px-1.5 font-sans text-[11px] text-fg-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] sm:flex">
                   {isMac() ? '⌘ K' : 'Ctrl K'}
                 </kbd>
               </>
             )}
-            <span aria-hidden className="h-4 w-px bg-white/[0.08]" />
+            <span aria-hidden className="hidden h-4 w-px bg-white/[0.08] sm:block" />
             <Link
               to="/settings"
               aria-label="Settings"
@@ -175,6 +176,9 @@ export function WorkspaceLayout({
             >
               <Settings className="h-4 w-4" strokeWidth={1.5} />
             </Link>
+            {/* undecorated desktop window: minimize / maximize / close pinned
+                at the top-right corner, next to the other header options */}
+            <WindowControls className="ml-1.5 border-l border-white/[0.08] pl-2.5" />
           </div>
         </div>
       </header>
