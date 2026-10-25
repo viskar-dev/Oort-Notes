@@ -1,7 +1,6 @@
 use note_core::{repo, Chapter, ChapterCanvas, Notebook, PagePreset, Topic, TopicPage, UiPreset};
 use sqlx::SqlitePool;
-use tauri::Manager;
-use tauri::State;
+use tauri::{Manager, State, WebviewWindow};
 
 mod ai_bridge;
 mod ai_commands;
@@ -625,6 +624,54 @@ async fn ping() -> R<String> {
     note_core::ping().await.map_err(map)
 }
 
+// =========================
+// Native window caption panel (tauri-plugin-decoration)
+// =========================
+
+// adds activate_decoration / restore_decoration / set_traffic_lights_inset
+use tauri_plugin_decoration::WebviewWindowExt;
+
+async fn restore_and_show(
+    window: &WebviewWindow,
+    activation_error: impl std::fmt::Display,
+) -> Result<&'static str, String> {
+    let restore_error = window.restore_decoration().await.err();
+    let show_error = window.show().err();
+
+    match (restore_error, show_error) {
+        (None, None) => Ok("native"),
+        (Some(restore), None) => Err(format!(
+            "custom decoration failed ({activation_error}); native restoration failed ({restore}), but the window was revealed"
+        )),
+        (None, Some(show)) => Err(format!(
+            "custom decoration failed ({activation_error}); native fallback could not be revealed ({show})"
+        )),
+        (Some(restore), Some(show)) => Err(format!(
+            "custom decoration failed ({activation_error}); native restoration failed ({restore}); revealing the fallback also failed ({show})"
+        )),
+    }
+}
+
+/// Called by the frontend after mount: swaps the native frame for the
+/// embedded caption panel and reveals the (initially hidden) window. Falls
+/// back to the plain native titlebar when activation fails.
+#[tauri::command]
+async fn activate_and_show(window: WebviewWindow) -> Result<&'static str, String> {
+    if let Err(error) = window.activate_decoration().await {
+        return restore_and_show(&window, error).await;
+    }
+
+    #[cfg(target_os = "macos")]
+    if let Err(error) = window.set_traffic_lights_inset(16.0, 20.0).await {
+        return restore_and_show(&window, error).await;
+    }
+
+    match window.show() {
+        Ok(()) => Ok("custom"),
+        Err(error) => restore_and_show(&window, error).await,
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // development convenience: picks up the repo-root .env (searches cwd and
@@ -632,6 +679,8 @@ pub fn run() {
     dotenvy::dotenv().ok();
 
     tauri::Builder::default()
+        // window chrome: must register before any webview is created
+        .plugin(tauri_plugin_decoration::init())
         .plugin(tauri_plugin_sql::Builder::default().build())
         .setup(|app| {
             let pool = tauri::async_runtime::block_on(async {
@@ -661,6 +710,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            activate_and_show,
             ping,
             create_notebook,
             list_notebooks,

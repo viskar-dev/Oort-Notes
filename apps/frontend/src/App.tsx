@@ -1,5 +1,6 @@
 import { Suspense, lazy, useEffect } from 'react';
 import { BrowserRouter, Navigate, Route, Routes, useNavigate, useParams } from 'react-router-dom';
+import { invoke, isTauri } from '@tauri-apps/api/core';
 import { api } from '@/lib/ipc';
 import { RouteErrorBoundary } from '@/pages/route-error-boundary';
 import { RouteError } from '@/pages/route-error';
@@ -85,6 +86,17 @@ function BrokenLink() {
 }
 
 export default function App() {
+  // Native window chrome (tauri-plugin-decoration): the window starts
+  // hidden; once the document is live we activate the embedded caption
+  // panel and reveal it. If activation fails the Rust command restores and
+  // shows the plain native titlebar instead.
+  useEffect(() => {
+    if (!isTauri()) return;
+    invoke('activate_and_show').catch((e) =>
+      console.error('[window] caption panel activation failed', e),
+    );
+  }, []);
+
   return (
     <div style={{ width: '100vw', height: '100vh', margin: 0, padding: 0, position: 'relative' }}>
       <BrowserRouter>

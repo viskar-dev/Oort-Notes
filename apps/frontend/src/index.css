@@ -35,6 +35,17 @@
   --ease-out: cubic-bezier(0.32, 0.72, 0, 1);
 }
 
+/* native window caption panel (tauri-plugin-decoration) runtime settings —
+   deliberately a plain :root rule, NOT @theme: Tailwind v4 tree-shakes
+   @theme variables that no utility references, and these are consumed by
+   the plugin's own stylesheet (invisible to Tailwind). Height matches the
+   app navbar band (h-14) so the buttons align inside every screen's
+   header; z-index sits above all app chrome. */
+:root {
+  --tauri-plugin-decoration-titlebar-height: 56px;
+  --tauri-plugin-decoration-z-index: 9999;
+}
+
 
 
 /* thin scrollbars: 4px, transparent track, thumb appears on container hover */
@@ -353,6 +364,21 @@ textarea:focus-visible,
 
 .tl-watermark_SEE-LICENSE {
   display: none !important;
+}
+
+/* ================= native caption panel fade =========================== */
+/* On canvas pages the window's native minimize/maximize/close (overlaid by
+   tauri-plugin-decoration at the top-right of the band) fade together with
+   the hover-revealed canvas chrome: CanvasTopBar toggles this body class. */
+[data-tauri-plugin-decoration-root] {
+  transition: opacity 200ms ease;
+}
+body.canvas-chrome-hidden [data-tauri-plugin-decoration-root],
+body.canvas-chrome-hidden
+  [data-tauri-plugin-decoration-root]
+  [data-tauri-decoration-controls] {
+  opacity: 0;
+  pointer-events: none;
 }
 
 /* ================= math (KaTeX) --------------------------------------- */

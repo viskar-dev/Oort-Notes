@@ -1,7 +1,5 @@
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft } from 'lucide-react';
-import { isTauri } from '@tauri-apps/api/core';
-import { WindowControls } from '@/components/layout/window-controls';
 import { PresetToolbarTab } from '@/components/global/presets/PresetToolbarTab';
 import { PresetColorsTab } from '@/components/global/presets/PresetColorsTab';
 import { PresetFontsTab } from '@/components/global/presets/PresetFontsTab';
@@ -21,26 +19,14 @@ export function PresetEditorPage() {
 
   return (
     <div className="min-h-screen bg-background text-ink">
-      {/* undecorated desktop window: minimize / maximize / close live at the
-          true top-right corner; the centered column reserves room below xl
-          (desktop build only — the browser has no window to control) */}
-      {isTauri() && (
-        <div
-          data-tauri-drag-region
-          className="fixed right-0 top-0 z-20 flex h-12 items-center border-l border-line bg-background/80 pl-1.5 pr-3 backdrop-blur-sm"
-        >
-          <WindowControls />
-        </div>
-      )}
-      <div
-        className={`mx-auto max-w-[1100px] py-8 pl-10 ${
-          isTauri() ? 'pr-[112px] xl:px-10' : 'pr-10'
-        }`}
-      >
-        {/* breadcrumb (its empty stretch drags the undecorated window) */}
+      <div className="mx-auto max-w-[1100px] py-8 px-10">
+        {/* breadcrumb (its empty stretch drags the undecorated window;
+            the native caption panel's right clearance is reserved by the
+            rows themselves so the lower content keeps the wide rhythm) */}
         <div
           data-tauri-drag-region
           className="mb-4 flex items-center gap-1.5 text-sm text-muted-foreground"
+          style={{ paddingRight: 'var(--tauri-plugin-decoration-right-clearance, 0px)' }}
         >
           <Link to="/settings" className="transition-colors hover:text-ink">
             Settings
@@ -56,6 +42,7 @@ export function PresetEditorPage() {
         <header
           data-tauri-drag-region
           className="mb-6 flex items-center justify-between"
+          style={{ paddingRight: 'var(--tauri-plugin-decoration-right-clearance, 0px)' }}
         >
           <div className="flex items-center gap-3">
             <button

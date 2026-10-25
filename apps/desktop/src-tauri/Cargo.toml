@@ -29,6 +29,8 @@ dotenvy.workspace = true
 rmcp.workspace = true
 axum.workspace = true
 rand.workspace = true
+# native window caption panel (minimize/restore/close overlay)
+tauri-plugin-decoration = "3"
 
 [lints]
 workspace = true

@@ -2,7 +2,6 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { Search, Settings } from 'lucide-react';
 import { isTauri } from '@tauri-apps/api/core';
-import { WindowControls } from '@/components/layout/window-controls';
 
 /** Shared width rhythm for the wide inner pages (chapters, settings). */
 export const APP_CONTAINER = 'mx-auto w-full max-w-7xl px-6 lg:px-8';
@@ -96,7 +95,8 @@ export function WorkspaceLayout({
             <div
               aria-hidden
               data-tauri-drag-region
-              className="hidden h-14 w-[108px] shrink-0 sm:block"
+              className="hidden h-14 shrink-0 sm:block"
+              style={{ width: 'var(--tauri-plugin-decoration-right-clearance, 0px)' }}
             />
           )}
           <div
@@ -196,14 +196,17 @@ export function WorkspaceLayout({
             </Link>
           </div>
           </div>
-          {/* undecorated desktop window: minimize / maximize / close pinned
-              to the true right edge, vertically centered in the navbar band;
-              the cluster above never slides under it (flex sizing). The cell
-              (and its left mirror) exists only in the desktop build. */}
+          {/* native caption panel (tauri-plugin-decoration): the plugin
+              overlays its measured controls at the true window corner, so
+              the navbar reserves exactly the published right clearance.
+              The var is 0px in fullscreen and when the native-fallback
+              titlebar is active, so the cell self-collapses. */}
           {isTauri() && (
-            <div className="flex h-14 w-[108px] shrink-0 items-center justify-center border-l border-white/[0.06]">
-              <WindowControls />
-            </div>
+            <div
+              aria-hidden
+              className="h-14 shrink-0"
+              style={{ width: 'var(--tauri-plugin-decoration-right-clearance, 0px)' }}
+            />
           )}
         </div>
       </header>
