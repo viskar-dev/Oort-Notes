@@ -67,11 +67,22 @@
   background: rgba(255, 255, 255, 0.12);
 }
 
+/* One scroll owner: the body. html/#root used to be scroll containers too —
+   three nested `overflow: auto` boxes meant the moment anything overflowed a
+   hair, a bar reserved 10px, and content sized to the viewport (min-h-screen)
+   no longer fit the shrunken box: both scrollbars locked on forever with no
+   visible overflow. Now the body scrolls pages; #root just grows. */
 html,
-body,
-#root {
+body {
   height: 100%;
-  overflow: auto;
+}
+html {
+  overflow: hidden;
+}
+body {
+  overflow-y: auto;
+  /* the page grid is designed to never need horizontal page-scroll */
+  overflow-x: hidden;
 }
 
 /* the page's single allowed gradient: a soft accent glow behind the chrome.
