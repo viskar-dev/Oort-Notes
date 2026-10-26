@@ -377,6 +377,26 @@ body.canvas-chrome-hidden
   [data-tauri-plugin-decoration-root] {
   transition-duration: 100ms;
 }
+
+/* native caption buttons: hover recolors the glyph to the app accent
+   (iris, like the AI chip) instead of the platform's background fill —
+   `body` prefix out-ranks the plugin stylesheet, which is injected later */
+body [data-tauri-plugin-decoration-root] [data-tauri-decoration-control]:hover,
+body
+  [data-tauri-plugin-decoration-root]
+  [data-tauri-decoration-control][data-tauri-decoration-hover] {
+  background: transparent;
+  color: var(--color-iris);
+}
+body
+  [data-tauri-plugin-decoration-root]
+  [data-tauri-decoration-control="close"]:hover,
+body
+  [data-tauri-plugin-decoration-root]
+  [data-tauri-decoration-control="close"][data-tauri-decoration-hover] {
+  background: transparent;
+  color: var(--color-iris);
+}
 body.canvas-chrome-hidden [data-tauri-plugin-decoration-root],
 body.canvas-chrome-hidden
   [data-tauri-plugin-decoration-root]
