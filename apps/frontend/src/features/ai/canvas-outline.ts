@@ -168,3 +168,28 @@ export function outlineShapes(editor: Editor, ids: Iterable<TLShapeId>): ShapeOu
   }
   return out;
 }
+
+/** The complete, unclipped internal state of one shape — the writable form
+ *  `update_shapes` / `create_shapes` accept (type, x, y, raw props) plus the
+ *  geometry bounds and parent. Coordinates come back at full precision: an
+ *  edit should land exactly where the shape already was. */
+export function fullShapeState(editor: Editor, id: TLShapeId): Record<string, unknown> | null {
+  const shape = editor.getShape(id);
+  if (!shape) return null;
+  const out: Record<string, unknown> = {
+    id: shape.id,
+    type: shape.type,
+    x: shape.x,
+    y: shape.y,
+  };
+  if (shape.parentId.startsWith('shape:')) out.parent_id = shape.parentId;
+  try {
+    const bounds = editor.getShapeGeometry(shape).bounds;
+    out.w = bounds.w;
+    out.h = bounds.h;
+  } catch {
+    // Geometry can fail on stale ids mid-batch: state without size.
+  }
+  if (shape.props && typeof shape.props === 'object') out.props = shape.props;
+  return out;
+}

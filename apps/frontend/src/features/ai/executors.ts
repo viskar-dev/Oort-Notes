@@ -19,7 +19,7 @@ import { getSnapshot, toRichText, type Box, type Editor, type TLShapeId } from '
 import { prepareSvg } from '@/features/canvas/svg-diagram/svg-diagram-shape';
 import { CODE_LANGUAGES } from '@/features/canvas/code-block/code-block-shape';
 import { parseMarkdownTable, createTableFromMarkdown } from '@/features/canvas/table-shape';
-import { outlineShapes } from './canvas-outline';
+import { outlineShapes, fullShapeState } from './canvas-outline';
 import { buildRichDocument } from './rich-text';
 import { confirmShapeDeletion } from './confirm-store';
 import { layoutDiagram } from './diagram-layout';
@@ -81,6 +81,8 @@ export async function executeAiTool(
       return getCanvas(deps);
     case 'get_selection':
       return { shapes: outlineShapes(deps.editor, deps.editor.getSelectedShapeIds()) };
+    case 'get_shape':
+      return getShape(deps.editor, args);
     case 'get_snapshot':
       // Internal plumbing for forced saves; never advertised to models.
       return { snapshot: getSnapshot(deps.editor.store), tldraw_version: null };
@@ -156,6 +158,18 @@ async function screenshot(editor: Editor, args: ToolArgs): Promise<ToolValue> {
   if (!image.blob) throw new Error('screenshot export failed');
   const base64 = await blobToBase64(image.blob);
   return { image_base64: base64, mime: 'image/png', width: image.width, height: image.height };
+}
+
+/** Complete internal state of one shape (the model's editing source of
+ *  truth). The id must have come from a tool result. */
+function getShape(editor: Editor, args: ToolArgs): ToolValue {
+  const id = args.shape_id;
+  if (typeof id !== 'string' || !id.startsWith('shape:')) {
+    throw new Error('"shape_id" must be a shape id a tool returned (it starts with "shape:")');
+  }
+  const state = fullShapeState(editor, id as TLShapeId);
+  if (!state) throw new Error(`no shape with id ${id} on this canvas`);
+  return state;
 }
 
 // ---------------------------------------------------------------------------

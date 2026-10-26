@@ -80,6 +80,11 @@ pub fn all_tools() -> Vec<ToolDef> {
             a::GetSelectionArgs, false, false, frontend
         ),
         def!(
+            "get_shape",
+            "Read one shape's complete state by id: type, x, y and the full verbatim props (code source, LaTeX, table markdown, card text, colors, arrow bindings) — unclipped, the source of truth that update_shapes edits against. Use it when the canvas outline is not detailed enough for a precise update, or before recreating a shape: read it, then delete it and create the replacement with the same id.",
+            a::GetShapeArgs, false, false, frontend
+        ),
+        def!(
             "get_screenshot",
             "Take a screenshot of the current canvas (or of the selection) as an image. Use it only when the text outline is not enough, e.g. for visual layout questions. If the client refuses large images, pass a small max_width such as 768 or 1024. Returns the image directly, not a file path.",
             a::ScreenshotArgs, false, false, frontend

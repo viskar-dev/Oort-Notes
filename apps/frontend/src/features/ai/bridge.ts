@@ -61,6 +61,7 @@ export async function handleCanvasCall(io: BridgeIo, call: AiCanvasCall): Promis
 export const EXECUTED_TOOLS = [
   'get_canvas',
   'get_selection',
+  'get_shape',
   'get_snapshot',
   'get_screenshot',
   'create_note',

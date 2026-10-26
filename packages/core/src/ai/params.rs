@@ -12,6 +12,13 @@ pub struct GetCanvasArgs {}
 #[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
 pub struct GetSelectionArgs {}
 
+/// Read one shape's complete internal state by id.
+#[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
+pub struct GetShapeArgs {
+    /// The shape id, exactly as another tool returned it (starts "shape:").
+    pub shape_id: String,
+}
+
 /// Screenshot of the canvas (or the selection), as a data URL.
 #[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
 pub struct ScreenshotArgs {

@@ -80,6 +80,7 @@ fn validate_args(name: &str, args: Value) -> Result<(), CoreError> {
         "get_canvas" | "get_selection" | "get_snapshot" => {
             serde_json::from_value::<a::GetCanvasArgs>(args).map(|_| ())
         }
+        "get_shape" => serde_json::from_value::<a::GetShapeArgs>(args).map(|_| ()),
         "get_screenshot" => serde_json::from_value::<a::ScreenshotArgs>(args).map(|_| ()),
         "create_note" => serde_json::from_value::<a::CreateNoteArgs>(args).map(|_| ()),
         "create_math_block" => serde_json::from_value::<a::CreateMathBlockArgs>(args).map(|_| ()),

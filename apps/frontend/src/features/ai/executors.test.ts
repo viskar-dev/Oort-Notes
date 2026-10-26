@@ -54,6 +54,44 @@ describe('executeAiTool routing', () => {
     ).rejects.toThrow('"text" is required');
   });
 
+  it('get_shape returns the full unclipped state of one shape', async () => {
+    const longCode = 'x = 1\n'.repeat(500); // ~3000 chars, far past the outline clip
+    const editor = {
+      ...makeEditor(),
+      getShape: vi.fn((id: string) =>
+        id === 'shape:k'
+          ? {
+              id: 'shape:k',
+              type: 'code-block',
+              x: 1.234567,
+              y: 9.876543,
+              parentId: 'page:1',
+              props: { code: longCode, language: 'python' },
+            }
+          : null,
+      ),
+      getShapeGeometry: vi.fn(() => ({ bounds: { w: 560, h: 300 } })),
+    } as unknown as AiExecutorDeps['editor'];
+
+    const state = await executeAiTool({ ...deps(), editor }, 'get_shape', { shape_id: 'shape:k' });
+    expect(state.type).toBe('code-block');
+    // Full precision coordinates: an edit can put it back exactly.
+    expect(state.x).toBe(1.234567);
+    expect(state.y).toBe(9.876543);
+    expect(state.w).toBe(560);
+    expect(state.h).toBe(300);
+    // Props go out verbatim — the outline's 600-char clip must not apply.
+    expect((state.props as { code: string }).code).toHaveLength(longCode.length);
+    expect((state.props as { code: string }).code.includes('…')).toBe(false);
+
+    await expect(
+      executeAiTool({ ...deps(), editor }, 'get_shape', { shape_id: 'shape:gone' }),
+    ).rejects.toThrow('no shape with id shape:gone');
+    await expect(
+      executeAiTool({ ...deps(), editor }, 'get_shape', { shape_id: 'page:1' }),
+    ).rejects.toThrow('starts with "shape:"');
+  });
+
   it('create_shapes requires a non-empty allow-listed array', async () => {
     await expect(executeAiTool(deps(), 'create_shapes', { shapes: [] })).rejects.toThrow(
       'non-empty array',
