@@ -20,7 +20,7 @@ import {
   aiSetKey,
   type AiConnectionInfo,
 } from '@/features/ai/ai-ipc';
-import { type AiDestructivePolicy, useAiPolicyStore } from '@/features/ai/policy-store';
+import { type AiDestructivePolicy, normPolicy, useAiPolicyStore } from '@/features/ai/policy-store';
 
 /* shared input/button classes for the flat settings look:
    inputs are the only bordered elements on the page */
