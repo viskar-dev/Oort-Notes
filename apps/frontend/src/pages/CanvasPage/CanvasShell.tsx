@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import { ChevronLeft, ChevronRight, Plus } from 'lucide-react';
 import { Tldraw } from 'tldraw';
 import { CodeBlockUtil } from '@/features/canvas/code-block/code-block-shape';
 import { SvgDiagramUtil } from '@/features/canvas/svg-diagram/svg-diagram-shape';
@@ -234,17 +235,6 @@ export function CanvasShell({ notebook, chapter }: { notebook: Notebook; chapter
             /* header strip (name / topic / ⋮) only on page chapters —
                infinite canvases stay clean, keeping Back + Settings chips */
             strip={isPageChapter}
-            pageControls={
-              isPageChapter && activePages.length > 0
-                ? {
-                    index: activePageIndex,
-                    count: activePages.length,
-                    onPrev: () => goToSheet(activePageIndex - 1),
-                    onNext: () => goToSheet(activePageIndex + 1),
-                    onAdd: addSheet,
-                  }
-                : null
-            }
             onOpenSettings={() => setSettingsOpen((o) => !o)}
             onBack={() => navigate(`/notebooks/${notebook.id}`)}
             onOpenAi={isTauri() ? () => useAiStore.getState().toggle() : undefined}
@@ -308,6 +298,40 @@ export function CanvasShell({ notebook, chapter }: { notebook: Notebook; chapter
               <AiChatPanel />
               <AiConfirmCard />
             </>
+          )}
+
+          {/* page pager: a floating chip at the bottom-right corner — page
+              nav lives beside the canvas content instead of the hover
+              chrome, so paging is always one hop away */}
+          {!pageView.viewMode && isPageChapter && activePages.length > 0 && (
+            <div className="pointer-events-auto absolute bottom-3 right-3 z-30 flex items-center gap-0.5 rounded-lg border border-line bg-raised px-1 py-0.5 shadow-[0_2px_10px_rgba(0,0,0,0.35)]">
+              <button
+                title="Previous page"
+                onClick={() => goToSheet(activePageIndex - 1)}
+                disabled={activePageIndex === 0}
+                className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-raised hover:text-foreground disabled:opacity-30 disabled:hover:bg-transparent"
+              >
+                <ChevronLeft className="h-3 w-3" />
+              </button>
+              <span className="min-w-10 text-center text-xs tabular-nums text-ink">
+                {activePageIndex + 1} / {activePages.length}
+              </span>
+              <button
+                title="Next page"
+                onClick={() => goToSheet(activePageIndex + 1)}
+                disabled={activePageIndex >= activePages.length - 1}
+                className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-raised hover:text-foreground disabled:opacity-30 disabled:hover:bg-transparent"
+              >
+                <ChevronRight className="h-3 w-3" />
+              </button>
+              <button
+                title="Add page"
+                onClick={addSheet}
+                className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-raised hover:text-foreground"
+              >
+                <Plus className="h-4 w-4" />
+              </button>
+            </div>
           )}
 
           <CanvasSettingsCard
