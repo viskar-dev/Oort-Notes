@@ -34,6 +34,10 @@ export interface AiCanvasCall {
   /** The chapter the call was pinned to (the executor rejects the call if
    *  the user has since switched canvases). */
   canvas_id: string;
+  /** Who is asking: the in-app assistant ("assistant") or a connected MCP
+   *  client ("mcp"). Destructive tools gate per caller — MCP callers confirm
+   *  in their client conversation, never via desktop UI. */
+  origin: 'assistant' | 'mcp';
 }
 
 export interface AiConnectionInfo {

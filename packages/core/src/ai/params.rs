@@ -221,10 +221,16 @@ pub struct UpdateShapesArgs {
     pub updates: Vec<serde_json::Value>,
 }
 
-/// Delete shapes by id.
+/// Delete shapes by id. Destructive: the confirmation lives with the caller
+/// (the app's card for the assistant; the MCP client's own conversation for
+/// external clients).
 #[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
 pub struct DeleteShapesArgs {
     pub ids: Vec<String>,
+    /// External (MCP) clients' destructive confirmation: the client surfaces
+    /// the confirmation in its own UI and re-sends the call with `true`. The
+    /// in-app assistant confirms through the app card and never sends this.
+    pub confirmed: Option<bool>,
 }
 
 /// Move the viewport so the given shapes (or all content) fit on screen.

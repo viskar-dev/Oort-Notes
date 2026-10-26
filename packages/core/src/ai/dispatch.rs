@@ -9,7 +9,7 @@ use sqlx::SqlitePool;
 use crate::error::CoreError;
 use crate::repo;
 
-use super::bridge::{self, Bridge};
+use super::bridge::{self, Bridge, CallOrigin};
 use super::config;
 use super::params;
 use super::tools::{self, Target};
@@ -30,6 +30,10 @@ pub struct DispatchCtx<'a> {
     /// `None` in hosts without a canvas bridge (e.g. the web shell) —
     /// frontend tools then fail cleanly instead of half-working.
     pub bridge: Option<&'a dyn Bridge>,
+    /// Who is calling (the in-app assistant or a connected MCP client). The
+    /// webview gates destructive tools per caller: MCP callers confirm in
+    /// their own client conversation and must never trigger desktop UI.
+    pub origin: CallOrigin,
 }
 
 impl DispatchCtx<'_> {
@@ -118,7 +122,7 @@ async fn frontend_tool(
         .active_canvas()
         .await?
         .ok_or_else(|| CoreError::Ai("no canvas is open — open a canvas in the app first".into()))?;
-    bridge::call_frontend_tool(bridge, name, args, &active.id).await
+    bridge::call_frontend_tool(bridge, name, args, &active.id, ctx.origin).await
 }
 
 /// Rust-target tools, implemented against the database (and, for save_canvas,
@@ -198,6 +202,7 @@ async fn rust_tool(ctx: &DispatchCtx<'_>, name: &str, args: Value) -> Result<Val
                 "get_snapshot",
                 serde_json::json!({}),
                 &active.id,
+                ctx.origin,
             )
             .await?;
             crate::repo::save_chapter_canvas(

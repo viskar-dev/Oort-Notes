@@ -58,10 +58,14 @@ export interface AiExecutorDeps {
   editor: Editor;
   /** Chapter rendering context (pages-mode geometry). */
   context: () => AiCanvasContext;
-  /** Destructive gate (inline card in the AI panel). */
+  /** Destructive gate for assistant calls (inline card in the AI panel). */
   confirm: (title: string, detail: string) => Promise<boolean>;
   /** True in view mode: mutations are rejected, reads go through. */
   readOnly: () => boolean;
+  /** Who the call is for. The assistant confirms destructive tools through
+   *  `confirm`; MCP-origin calls confirm inside the client's own
+   *  conversation (`confirmed` arg) and must never trigger desktop UI. */
+  origin: 'assistant' | 'mcp';
 }
 
 type ToolArgs = Record<string, unknown>;
@@ -110,7 +114,7 @@ export async function executeAiTool(
     case 'update_shapes':
       return updateShapes(deps.editor, args);
     case 'delete_shapes':
-      return await deleteShapes(deps.editor, args);
+      return await deleteShapes(deps, args);
     case 'focus_viewport':
       return focusViewport(deps.editor, args);
     default:
@@ -813,7 +817,8 @@ function updateShapes(editor: Editor, args: ToolArgs): ToolValue {
   return { updated, errors };
 }
 
-function deleteShapes(editor: Editor, args: ToolArgs): Promise<ToolValue> {
+function deleteShapes(deps: AiExecutorDeps, args: ToolArgs): Promise<ToolValue> {
+  const editor = deps.editor;
   const ids = args.ids;
   if (!Array.isArray(ids) || ids.length === 0) {
     throw new Error('"ids" must be a non-empty array of shape ids');
@@ -824,7 +829,25 @@ function deleteShapes(editor: Editor, args: ToolArgs): Promise<ToolValue> {
   if (existing.length === 0) {
     throw new Error('none of the ids refer to a shape on the active page');
   }
-  return confirmShapeDeletion(existing.length).then((ok) => {
+
+  // Destructive confirmation lives with the caller. MCP-origin calls resolve
+  // it inside the client's own conversation: an unconfirmed call comes back
+  // as a structured result the client's model can act on (re-send with
+  // "confirmed": true) — and no dialog ever pops up on the desktop. The
+  // assistant ignores a model-supplied `confirmed`; its confirmation is the
+  // app's own card, so the model can never self-approve.
+  if (deps.origin === 'mcp' && args.confirmed !== true) {
+    return Promise.resolve({
+      status: 'requires_confirmation',
+      count: existing.length,
+      prompt: `Delete ${existing.length} shape(s) on this canvas? Re-send delete_shapes with the same ids and "confirmed": true to delete them.`,
+    });
+  }
+  const approved =
+    deps.origin === 'assistant'
+      ? confirmShapeDeletion(existing.length)
+      : Promise.resolve(true);
+  return approved.then((ok) => {
     if (!ok) throw new Error('delete cancelled by the user');
     editor.run(() => {
       editor.deleteShapes(existing.map((id) => id as TLShapeId));

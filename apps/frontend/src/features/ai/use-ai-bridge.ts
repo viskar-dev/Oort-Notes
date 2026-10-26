@@ -46,10 +46,10 @@ export function useAiBridge(
 
     const io: BridgeIo = {
       chapterId: () => chapterId,
-      runTool: (name, args) => {
+      runTool: (name, args, origin) => {
         const editor = getEditor();
         if (!editor) throw new Error('the canvas editor is not ready yet');
-        return executeAiTool({ ...depsRef.current, editor }, name, args);
+        return executeAiTool({ ...depsRef.current, editor, origin }, name, args);
       },
       answer: async (id, ok, error, result) => {
         await answerCanvasCall(id, ok, error, result);

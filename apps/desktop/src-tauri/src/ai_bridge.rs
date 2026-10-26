@@ -10,7 +10,7 @@ use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::oneshot;
 
-use note_core::ai::bridge::{BoxFut, Bridge};
+use note_core::ai::bridge::{BoxFut, Bridge, CallOrigin};
 
 /// One outgoing tool call, as the webview sees it.
 #[derive(Debug, Clone, Serialize)]
@@ -22,6 +22,10 @@ pub struct CanvasCall {
     /// The canvas the call was pinned to (the executor must reject the call
     /// if the user has since switched canvases).
     pub canvas_id: String,
+    /// Who is asking ("assistant" | "mcp") — the webview gates destructive
+    /// tools per caller (MCP callers confirm in their own client, never via
+    /// desktop UI).
+    pub origin: String,
 }
 
 pub struct DesktopBridge {
@@ -74,7 +78,13 @@ impl DesktopBridge {
 }
 
 impl Bridge for DesktopBridge {
-    fn call_frontend<'a>(&'a self, name: &'a str, args: Value, canvas_id: &'a str) -> BoxFut<'a> {
+    fn call_frontend<'a>(
+        &'a self,
+        name: &'a str,
+        args: Value,
+        canvas_id: &'a str,
+        origin: CallOrigin,
+    ) -> BoxFut<'a> {
         let call_id = Self::new_call_id();
         let (tx, rx) = oneshot::channel();
         self.pending_lock().insert(call_id.clone(), tx);
@@ -84,6 +94,7 @@ impl Bridge for DesktopBridge {
             name: name.to_string(),
             args,
             canvas_id: canvas_id.to_string(),
+            origin: origin.as_str().to_string(),
         };
         match self.main_window() {
             Some(window) => {

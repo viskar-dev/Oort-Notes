@@ -141,7 +141,7 @@ pub fn all_tools() -> Vec<ToolDef> {
         ),
         def!(
             "delete_shapes",
-            "Delete shapes by id. Destructive: the user must confirm. Never lists ids you did not receive from a tool result.",
+            "Delete shapes by id. Destructive and caller-confirmed: over MCP, an unconfirmed call returns {\"status\": \"requires_confirmation\", ...} — surface the confirmation to the user in the client UI, then re-send the same call with \"confirmed\": true; the desktop app never pops a dialog for MCP calls. In the app's own chat, the user confirms in the confirmation card. Never list ids you did not receive from a tool result.",
             a::DeleteShapesArgs, true, false, frontend
         ),
         def!(

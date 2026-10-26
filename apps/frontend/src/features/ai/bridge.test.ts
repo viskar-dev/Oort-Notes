@@ -20,17 +20,17 @@ describe('handleCanvasCall', () => {
   it('pinned calls run the executor and answer ok', async () => {
     const runTool = vi.fn(async () => ({ shapes: [] }));
     const io = makeIo({ runTool });
-    await handleCanvasCall(io, { id: 'c1', name: 'get_canvas', args: {}, canvas_id: 'chapter-1' });
-    expect(runTool).toHaveBeenCalledWith('get_canvas', {});
+    await handleCanvasCall(io, { id: 'c1', name: 'get_canvas', args: {}, canvas_id: 'chapter-1', origin: 'assistant' });
+    expect(runTool).toHaveBeenCalledWith('get_canvas', {}, 'assistant');
     expect(io.answers).toEqual([{ id: 'c1', ok: true, error: null, result: { shapes: [] } }]);
   });
 
-  it('passes the args through untouched', async () => {
+  it('passes the args and the origin through untouched', async () => {
     const runTool = vi.fn(async () => ({}));
     const io = makeIo({ runTool });
-    const args = { text: 'hi', x: 3 };
-    await handleCanvasCall(io, { id: 'c2', name: 'create_note', args, canvas_id: 'chapter-1' });
-    expect(runTool).toHaveBeenCalledWith('create_note', args);
+    const args = { ids: ['shape:a'], confirmed: true };
+    await handleCanvasCall(io, { id: 'c2', name: 'delete_shapes', args, canvas_id: 'chapter-1', origin: 'mcp' });
+    expect(runTool).toHaveBeenCalledWith('delete_shapes', args, 'mcp');
   });
 
   it('rejects calls whose canvas pin no longer matches', async () => {
@@ -53,7 +53,7 @@ describe('handleCanvasCall', () => {
       throw new Error('exec boom');
     });
     const io = makeIo({ runTool });
-    await handleCanvasCall(io, { id: 'c4', name: 'create_shapes', args: {}, canvas_id: 'chapter-1' });
+    await handleCanvasCall(io, { id: 'c4', name: 'create_shapes', args: {}, canvas_id: 'chapter-1', origin: 'assistant' });
     expect(io.answers).toEqual([
       { id: 'c4', ok: false, error: 'exec boom', result: null },
     ]);
@@ -64,15 +64,15 @@ describe('handleCanvasCall', () => {
       throw 'plain string failure';
     });
     const io = makeIo({ runTool });
-    await handleCanvasCall(io, { id: 'c5', name: 'x', args: {}, canvas_id: 'chapter-1' });
+    await handleCanvasCall(io, { id: 'c5', name: 'x', args: {}, canvas_id: 'chapter-1', origin: 'assistant' });
     expect(io.answers[0].error).toBe('plain string failure');
   });
 
   it('missing args arrive as an empty object', async () => {
     const runTool = vi.fn(async () => ({}));
     const io = makeIo({ runTool });
-    await handleCanvasCall(io, { id: 'c6', name: 'get_selection', canvas_id: 'chapter-1' });
-    expect(runTool).toHaveBeenCalledWith('get_selection', {});
+    await handleCanvasCall(io, { id: 'c6', name: 'get_selection', canvas_id: 'chapter-1', origin: 'assistant' });
+    expect(runTool).toHaveBeenCalledWith('get_selection', {}, 'assistant');
   });
 });
 

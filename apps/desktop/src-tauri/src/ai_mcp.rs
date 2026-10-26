@@ -39,6 +39,7 @@ use sqlx::SqlitePool;
 use tauri::{AppHandle, Manager};
 
 use note_core::ai::{dispatch, tools};
+use note_core::ai::bridge::CallOrigin;
 
 use crate::ai_bridge::DesktopBridge;
 
@@ -62,7 +63,13 @@ impl OortMcp {
     }
 
     fn dispatch_ctx(&self) -> dispatch::DispatchCtx<'_> {
-        dispatch::DispatchCtx { pool: &self.pool, bridge: Some(self.bridge.as_ref()) }
+        dispatch::DispatchCtx {
+            pool: &self.pool,
+            bridge: Some(self.bridge.as_ref()),
+            // Every call served here comes from a connected MCP client:
+            // destructive tools confirm in the client's own conversation.
+            origin: CallOrigin::Mcp,
+        }
     }
 
     fn mcp_error(e: note_core::CoreError) -> McpError {
@@ -301,7 +308,12 @@ mod shim_api {
         name: String,
         args: Option<serde_json::Map<String, Value>>,
     ) -> Result<Json<Value>, (StatusCode, String)> {
-        let ctx = dispatch::DispatchCtx { pool: &shared.pool, bridge: Some(shared.bridge.as_ref()) };
+        let ctx = dispatch::DispatchCtx {
+            pool: &shared.pool,
+            bridge: Some(shared.bridge.as_ref()),
+            // REST shim callers are MCP clients too (manually wired tools).
+            origin: CallOrigin::Mcp,
+        };
         match dispatch::dispatch(&ctx, &name, Value::Object(args.unwrap_or_default())).await {
             Ok(result) => Ok(Json(serde_json::json!({ "ok": true, "result": result }))),
             Err(e) => Err((StatusCode::BAD_REQUEST, e.to_string())),

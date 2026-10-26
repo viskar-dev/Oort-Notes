@@ -19,6 +19,7 @@ function deps(): AiExecutorDeps {
     context: () => ({ canvas_type: 'infinite', page: null }),
     confirm: async () => true,
     readOnly: () => useViewModeStore.getState().on,
+    origin: 'assistant',
   };
 }
 
@@ -196,6 +197,62 @@ describe('executeAiTool routing', () => {
     ).rejects.toThrow('cancelled by the user');
     expect(requests).toHaveLength(1);
     expect(editor.deleteShapes).not.toHaveBeenCalled();
+  }, 5000);
+
+  it('delete_shapes never self-approves for the assistant, even with confirmed', async () => {
+    const requests: Array<{ title: string }> = [];
+    useAiConfirmStore.setState({
+      requestConfirm: async (title) => {
+        requests.push({ title });
+        return true;
+      },
+    });
+    const editor = {
+      ...makeEditor(),
+      getShape: vi.fn(() => ({ id: 'shape:a' })),
+      deleteShapes: vi.fn(),
+    } as unknown as AiExecutorDeps['editor'];
+    // The model passing "confirmed": true must not bypass the app's card.
+    await executeAiTool(
+      { ...deps(), editor },
+      'delete_shapes',
+      { ids: ['shape:a'], confirmed: true },
+    );
+    expect(requests).toHaveLength(1); // the card showed
+    expect(editor.deleteShapes).toHaveBeenCalledWith(['shape:a']);
+  }, 5000);
+
+  it('mcp delete returns requires_confirmation without any desktop UI', async () => {
+    const confirmSpy = vi.fn();
+    useAiConfirmStore.setState({ requestConfirm: confirmSpy });
+    const editor = {
+      ...makeEditor(),
+      getShape: vi.fn(() => ({ id: 'shape:a' })),
+      deleteShapes: vi.fn(),
+    } as unknown as AiExecutorDeps['editor'];
+
+    // Unconfirmed: a structured result the client model acts on — no card,
+    // no error, no deletion.
+    const pending = await executeAiTool(
+      { ...deps(), editor, origin: 'mcp' },
+      'delete_shapes',
+      { ids: ['shape:a'] },
+    );
+    expect(pending).toMatchObject({ status: 'requires_confirmation', count: 1 });
+    expect(String(pending.prompt).includes('confirmed')).toBe(true);
+    expect(confirmSpy).not.toHaveBeenCalled();
+    expect(editor.deleteShapes).not.toHaveBeenCalled();
+
+    // The client confirms in its own UI and re-sends: deletion proceeds,
+    // still without desktop UI.
+    const done = await executeAiTool(
+      { ...deps(), editor, origin: 'mcp' },
+      'delete_shapes',
+      { ids: ['shape:a'], confirmed: true },
+    );
+    expect(done).toEqual({ deleted: ['shape:a'] });
+    expect(editor.deleteShapes).toHaveBeenCalledTimes(1);
+    expect(confirmSpy).not.toHaveBeenCalled();
   }, 5000);
 
   // -----------------------------------------------------------------

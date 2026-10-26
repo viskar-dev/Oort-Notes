@@ -9,6 +9,7 @@ use tauri::{Emitter, State};
 use sqlx::SqlitePool;
 
 use note_core::ai::{self, dispatch::DispatchCtx, llm};
+use note_core::ai::bridge::CallOrigin;
 
 use crate::ai_bridge::DesktopBridge;
 use crate::ai_mcp::McpState;
@@ -101,7 +102,7 @@ pub async fn list_tool_names() -> R<Vec<String>> {
 /// "is a canvas actually open" without a round-trip through MCP itself.
 async fn mcp_info_value(pool: &SqlitePool, info: crate::ai_mcp::McpConnectionInfo) -> Option<Value> {
     let mut value = serde_json::to_value(info).ok()?;
-    let canvas = DispatchCtx { pool, bridge: None }
+    let canvas = DispatchCtx { pool, bridge: None, origin: CallOrigin::Assistant }
         .active_canvas()
         .await
         .ok()
@@ -171,7 +172,12 @@ pub async fn ai_chat(
         .ok_or_else(|| "no API key set — add one in AI settings first".to_string())?;
 
     let client = llm::LlmClient::new(&config.base_url, &config.model, &api_key);
-    let ctx = DispatchCtx { pool: &pool, bridge: Some(bridge.as_ref()) };
+    let ctx = DispatchCtx {
+        pool: &pool,
+        bridge: Some(bridge.as_ref()),
+        // The in-app assistant confirms destructive tools via the app's card.
+        origin: CallOrigin::Assistant,
+    };
     let emitter = app.clone();
     ai::llm::run_agent_with_sink(
         &client,

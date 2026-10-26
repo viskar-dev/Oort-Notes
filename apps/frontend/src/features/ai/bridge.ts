@@ -6,9 +6,16 @@
 
 import type { AiCanvasCall } from './ai-ipc';
 
+/** Who a canvas call is for. Mirrors `note_core::ai::bridge::CallOrigin`. */
+export type BridgeCallOrigin = 'assistant' | 'mcp';
+
+/** The origin is part of the executor contract, not just plumbing record:
+ *  destructive tools (delete_shapes) gate per caller — an MCP call must
+ *  confirm back inside the client's own conversation, never via desktop UI. */
 export type BridgeToolRunner = (
   name: string,
   args: Record<string, unknown>,
+  origin: BridgeCallOrigin,
 ) => Promise<Record<string, unknown>>;
 
 export type BridgeAnswer = (
@@ -49,7 +56,7 @@ export async function handleCanvasCall(io: BridgeIo, call: AiCanvasCall): Promis
     return;
   }
   try {
-    const result = await io.runTool(call.name, call.args ?? {});
+    const result = await io.runTool(call.name, call.args ?? {}, call.origin ?? 'assistant');
     await io.answer(call.id, true, null, result);
   } catch (error) {
     await io.answer(call.id, false, errorMessage(error), null);

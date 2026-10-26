@@ -25,6 +25,27 @@ pub type BridgeResult = Result<Value, String>;
 
 pub type BoxFut<'a> = Pin<Box<dyn Future<Output = BridgeResult> + Send + 'a>>;
 
+/// Who is calling a frontend tool. The webview gates destructive tools
+/// per caller: the in-app assistant confirms through the app's own card,
+/// while external (MCP) callers confirm inside their client conversation —
+/// no confirmation UI may pop up on the desktop for them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CallOrigin {
+    /// Oort's built-in chat panel.
+    Assistant,
+    /// A connected MCP client (server or shim REST).
+    Mcp,
+}
+
+impl CallOrigin {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            CallOrigin::Assistant => "assistant",
+            CallOrigin::Mcp => "mcp",
+        }
+    }
+}
+
 /// Notification events the bridge may forward. Kept symbolic so the webview
 /// contract stays in one place.
 pub mod events {
@@ -38,8 +59,15 @@ pub mod events {
 pub trait Bridge: Send + Sync {
     /// Run a frontend tool on the currently open canvas. `canvas_id` pins the
     /// call to the canvas dispatch resolved — the executor must reject the
-    /// call if the user has since switched canvases.
-    fn call_frontend<'a>(&'a self, name: &'a str, args: Value, canvas_id: &'a str) -> BoxFut<'a>;
+    /// call if the user has since switched canvases. `origin` tells the
+    /// webview who is asking (destructive-tool confirmation differs).
+    fn call_frontend<'a>(
+        &'a self,
+        name: &'a str,
+        args: Value,
+        canvas_id: &'a str,
+        origin: CallOrigin,
+    ) -> BoxFut<'a>;
 
     /// Emit a lifecycle notification (grouped undo markers). Optional.
     fn notify(&self, _event: &'static str) {}
@@ -52,8 +80,9 @@ pub async fn call_frontend_tool(
     name: &str,
     args: Value,
     canvas_id: &str,
+    origin: CallOrigin,
 ) -> Result<Value, CoreError> {
-    let fut = bridge.call_frontend(name, args, canvas_id);
+    let fut = bridge.call_frontend(name, args, canvas_id, origin);
     match tokio::time::timeout(TOOL_TIMEOUT, fut).await {
         Ok(Ok(value)) => Ok(value),
         Ok(Err(err)) => Err(CoreError::Ai(format!("{name} failed: {err}"))),

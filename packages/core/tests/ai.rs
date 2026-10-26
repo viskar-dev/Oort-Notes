@@ -3,7 +3,7 @@
 
 use std::sync::Mutex;
 
-use note_core::ai::bridge::{Bridge, BoxFut};
+use note_core::ai::bridge::{Bridge, BoxFut, CallOrigin};
 use note_core::ai::config;
 use note_core::ai::dispatch::{dispatch, DispatchCtx};
 use note_core::ai::tools;
@@ -18,6 +18,7 @@ struct Recorded {
     name: String,
     args: Value,
     canvas_id: String,
+    origin: CallOrigin,
 }
 
 struct FakeBridge {
@@ -43,17 +44,25 @@ impl FakeBridge {
             name: r.name.clone(),
             args: r.args.clone(),
             canvas_id: r.canvas_id.clone(),
+            origin: r.origin,
         })
         .unwrap()
     }
 }
 
 impl Bridge for FakeBridge {
-    fn call_frontend<'a>(&'a self, name: &'a str, args: Value, canvas_id: &'a str) -> BoxFut<'a> {
+    fn call_frontend<'a>(
+        &'a self,
+        name: &'a str,
+        args: Value,
+        canvas_id: &'a str,
+        origin: CallOrigin,
+    ) -> BoxFut<'a> {
         self.calls.lock().unwrap().push(Recorded {
             name: name.to_string(),
             args: args.clone(),
             canvas_id: canvas_id.to_string(),
+            origin,
         });
         let result = self.result.clone();
         Box::pin(async move { Ok(result) })
@@ -197,7 +206,7 @@ async fn frontend_tools_route_to_open_canvas() {
         .await
         .unwrap();
     let bridge = FakeBridge::new(json!({ "shapes": [] }));
-    let ctx = DispatchCtx { pool: &pool, bridge: Some(&bridge) };
+    let ctx = DispatchCtx { pool: &pool, bridge: Some(&bridge), origin: CallOrigin::Assistant };
 
     let args = json!({ "focus_selection": true });
     let value = dispatch(&ctx, "get_canvas", args.clone()).await.unwrap();
@@ -210,6 +219,24 @@ async fn frontend_tools_route_to_open_canvas() {
         call.canvas_id, chapter.id,
         "frontend call is pinned to the active canvas"
     );
+    assert_eq!(
+        call.origin,
+        CallOrigin::Assistant,
+        "the caller origin reaches the webview"
+    );
+}
+
+#[tokio::test]
+async fn mcp_ctx_calls_bridge_with_mcp_origin() {
+    let (pool, _, chapter) = seed().await;
+    config::set_active_canvas(&pool, Some(&chapter.id))
+        .await
+        .unwrap();
+    let bridge = FakeBridge::new(json!({ "deleted": [] }));
+    // How the MCP server builds its context (ai_mcp::OortMcp::dispatch_ctx).
+    let ctx = DispatchCtx { pool: &pool, bridge: Some(&bridge), origin: CallOrigin::Mcp };
+    dispatch(&ctx, "get_canvas", json!({})).await.unwrap();
+    assert_eq!(bridge.single_call().origin, CallOrigin::Mcp);
 }
 
 #[tokio::test]
@@ -217,7 +244,7 @@ async fn frontend_tools_fail_cleanly_without_canvas() {
     let (pool, _, _) = seed().await;
     // Pointer never set.
     let bridge = FakeBridge::new(json!({}));
-    let ctx = DispatchCtx { pool: &pool, bridge: Some(&bridge) };
+    let ctx = DispatchCtx { pool: &pool, bridge: Some(&bridge), origin: CallOrigin::Assistant };
     let err = expect_err(&ctx, "get_canvas", json!({})).await;
     assert!(err.contains("no canvas"), "got: {err}");
     assert!(bridge.calls.lock().unwrap().is_empty());
@@ -227,7 +254,7 @@ async fn frontend_tools_fail_cleanly_without_canvas() {
 async fn frontend_tools_fail_cleanly_without_bridge() {
     let (pool, _, chapter) = seed().await;
     config::set_active_canvas(&pool, Some(&chapter.id)).await.unwrap();
-    let ctx = DispatchCtx { pool: &pool, bridge: None };
+    let ctx = DispatchCtx { pool: &pool, bridge: None, origin: CallOrigin::Assistant };
     let err = expect_err(&ctx, "get_canvas", json!({})).await;
     assert!(err.contains("bridge is not running"), "got: {err}");
 }
@@ -237,7 +264,7 @@ async fn stale_canvas_pointer_resolves_to_none() {
     let (pool, _, _) = seed().await;
     config::set_active_canvas(&pool, Some("deleted-chapter")).await.unwrap();
     let bridge = FakeBridge::new(json!({}));
-    let ctx = DispatchCtx { pool: &pool, bridge: Some(&bridge) };
+    let ctx = DispatchCtx { pool: &pool, bridge: Some(&bridge), origin: CallOrigin::Assistant };
     // A pointer that survived a deleted chapter reads as "no canvas open".
     let err = expect_err(&ctx, "get_canvas", json!({})).await;
     assert!(err.contains("no canvas"), "got: {err}");
@@ -253,7 +280,7 @@ async fn invalid_args_are_rejected_before_execution() {
     config::set_active_canvas(&pool, Some(&chapter.id)).await.unwrap();
     // create_note without the required `text` arg.
     let bridge = FakeBridge::new(json!({}));
-    let ctx = DispatchCtx { pool: &pool, bridge: Some(&bridge) };
+    let ctx = DispatchCtx { pool: &pool, bridge: Some(&bridge), origin: CallOrigin::Assistant };
     let err = expect_err(&ctx, "create_note", json!({ "x": 1.0 })).await;
     assert!(err.contains("invalid arguments"), "got: {err}");
     assert!(bridge.calls.lock().unwrap().is_empty(), "no call on invalid args");
@@ -262,7 +289,7 @@ async fn invalid_args_are_rejected_before_execution() {
 #[tokio::test]
 async fn unknown_tool_is_not_found() {
     let (pool, _, _) = seed().await;
-    let ctx = DispatchCtx { pool: &pool, bridge: None };
+    let ctx = DispatchCtx { pool: &pool, bridge: None, origin: CallOrigin::Assistant };
     let err = expect_err(&ctx, "delete_everything", json!({})).await;
     assert!(err.contains("no tool named"), "got: {err}");
 }
@@ -275,7 +302,7 @@ async fn unknown_tool_is_not_found() {
 async fn get_active_canvas_reports_the_open_canvas() {
     let (pool, _, chapter) = seed().await;
     config::set_active_canvas(&pool, Some(&chapter.id)).await.unwrap();
-    let ctx = DispatchCtx { pool: &pool, bridge: None };
+    let ctx = DispatchCtx { pool: &pool, bridge: None, origin: CallOrigin::Assistant };
 
     let value = dispatch(&ctx, "get_active_canvas", json!({})).await.unwrap();
     assert_eq!(
@@ -321,7 +348,7 @@ async fn list_canvases_joins_notebook_names() {
         .unwrap();
     repo::create_topic_page(&pool, &new_id(), &topic.id, "Page 1").await.unwrap();
     repo::create_topic_page(&pool, &new_id(), &topic.id, "Page 2").await.unwrap();
-    let ctx = DispatchCtx { pool: &pool, bridge: None };
+    let ctx = DispatchCtx { pool: &pool, bridge: None, origin: CallOrigin::Assistant };
 
     let value = dispatch(&ctx, "list_canvases", json!({})).await.unwrap();
     let canvases = value["canvases"].as_array().unwrap();
@@ -374,7 +401,7 @@ async fn save_canvas_persists_the_webview_snapshot() {
         },
         "tldraw_version": "3.15.1",
     }));
-    let ctx = DispatchCtx { pool: &pool, bridge: Some(&bridge) };
+    let ctx = DispatchCtx { pool: &pool, bridge: Some(&bridge), origin: CallOrigin::Assistant };
 
     let value = dispatch(&ctx, "save_canvas", json!({})).await.unwrap();
     assert_eq!(value["saved"], true);
