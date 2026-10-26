@@ -37,13 +37,15 @@ export function SettingsLayout({
     section === 'presets'
       ? [{ label: 'Settings' }]
       : [{ label: 'Settings', to: '/settings' }, { label: current.label }];  return (
-    <WorkspaceLayout crumbs={crumbs}>
-      <div className={`${APP_CONTAINER} flex flex-1 items-start gap-10 pb-16 pt-10`}>
+    <WorkspaceLayout crumbs={crumbs} flat>
+      <div className={`${APP_CONTAINER} flex flex-1 items-start gap-12 pb-16 pt-10`}>
         <aside className="w-48 shrink-0" aria-label="Settings">
-          <div className="mb-2 px-2 text-[11px] font-semibold tracking-widest text-muted-foreground">
+          <div className="mb-2 px-3 text-xs font-medium tracking-widest text-muted-foreground">
             SETTINGS
           </div>
-          <nav className="flex flex-col gap-0.5">
+          {/* 32px rows, 13px text, 2px gaps, no border/accent bar — active
+              gets a faint fill with the accent on the icon only */}
+          <nav className="flex flex-col gap-[2px]">
             {visibleSections().map(({ id, label, to, icon: Icon }) => (
               <Link
                 key={id}
@@ -51,11 +53,15 @@ export function SettingsLayout({
                 aria-current={id === section ? 'page' : undefined}
                 className={
                   id === section
-                    ? 'flex items-center gap-2 rounded-lg bg-raised px-2 py-2 text-left text-sm font-medium text-primary'
-                    : 'flex items-center gap-2 rounded-lg px-2 py-2 text-left text-sm text-muted-foreground transition-colors hover:text-ink'
+                    ? 'flex h-8 items-center gap-2.5 rounded-md bg-white/[0.05] px-3 text-left text-[13px] text-ink'
+                    : 'flex h-8 items-center gap-2.5 rounded-md px-3 text-left text-[13px] text-muted-foreground transition-colors hover:text-ink'
                 }
               >
-                <Icon className="h-4 w-4" /> {label}
+                <Icon
+                  className={`h-4 w-4 ${id === section ? 'text-primary' : 'text-muted-foreground'}`}
+                  strokeWidth={1.5}
+                />
+                {label}
               </Link>
             ))}
           </nav>

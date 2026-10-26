@@ -44,6 +44,7 @@ export function WorkspaceLayout({
   footerNote = 'Last synced just now',
   showFooter = true,
   syncDot = false,
+  flat = false,
   children,
 }: {
   /** When omitted the navbar renders a search icon button instead of the
@@ -57,6 +58,9 @@ export function WorkspaceLayout({
   showFooter?: boolean;
   /** Fixed bottom-right "Synced just now" chip (notebooks home). */
   syncDot?: boolean;
+  /** Flat chrome (settings shell): no bottom border on the navbar, 13px
+   *  muted breadcrumb parents with a white current page. UI-only look. */
+  flat?: boolean;
   children: ReactNode;
 }) {
   const searchRef = useRef<HTMLInputElement>(null);
@@ -85,7 +89,9 @@ export function WorkspaceLayout({
 
   return (
     <div className="nb-root flex min-h-screen flex-col">
-      <header className="sticky top-0 z-20 border-b border-white/[0.06] bg-bg/60 backdrop-blur-md">
+      <header
+        className={`sticky top-0 z-20 bg-bg/60 backdrop-blur-md ${flat ? '' : 'border-b border-white/[0.06]'}`}
+      >
         {/* full-bleed row: the page content keeps the centered container
             rhythm (left spacer mirrors the controls cell so the column stays
             optically centered), while the window controls own the true
@@ -128,16 +134,19 @@ export function WorkspaceLayout({
             {crumbs.length > 1 &&
               crumbs.map((crumb, i) => (
                 <span key={`${crumb.label}-${i}`} className="flex min-w-0 items-center gap-1.5">
-                  <span className="text-sm text-fg-3">/</span>
+                  <span className={`${flat ? 'text-[13px] text-fg-3' : 'text-sm text-fg-3'}`}>/</span>
                   {crumb.to ? (
                     <Link
                       to={crumb.to}
-                      className="truncate text-sm text-fg-2 transition-colors hover:text-fg-1"
+                      className={`${flat ? 'text-[13px] text-fg-3' : 'text-sm text-fg-2'} truncate transition-colors hover:text-fg-1`}
                     >
                       {crumb.label}
                     </Link>
                   ) : (
-                    <span data-tauri-drag-region className="truncate text-sm text-fg-1">
+                    <span
+                      data-tauri-drag-region
+                      className={`${flat ? 'text-[13px] text-fg-1' : 'text-sm text-fg-1'} truncate`}
+                    >
                       {crumb.label}
                     </span>
                   )}
