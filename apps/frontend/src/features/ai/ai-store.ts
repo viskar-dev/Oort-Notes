@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { aiChat, type AiAgentEvent, type AiHistoryMessage } from './ai-ipc';
+import { aiChat, listenAiTurnEvents, type AiAgentEvent, type AiHistoryMessage } from './ai-ipc';
 import { useViewModeStore } from '@/stores/view-mode-store';
 
 /**
@@ -44,6 +44,18 @@ function historyOf(events: ConversationEvent[]): AiHistoryMessage[] {
     .map((event) => ({ role: event.kind === 'user' ? 'user' : 'assistant', content: event.text }));
 }
 
+/** Replace the streamed tail of a running turn with the authoritative
+ *  result. The stream and the final list carry the same events by
+ *  construction (collector pushes to both), so settling is an exact N-event
+ *  window swap — and heals any formatting drift between the two channels. */
+export function settleTurn(
+  events: ConversationEvent[],
+  agentEvents: AiAgentEvent[],
+): ConversationEvent[] {
+  const head = events.slice(0, Math.max(0, events.length - agentEvents.length));
+  return [...head, ...agentEvents.map((event) => ({ kind: 'agent' as const, ...event }))];
+}
+
 export const useAiStore = create<AiState>((set, get) => ({
   open: false,
   setOpen: (open) => set({ open, error: open ? null : get().error }),
@@ -59,12 +71,28 @@ export const useAiStore = create<AiState>((set, get) => ({
     set({ busy: true, error: null });
     const withPrompt: ConversationEvent[] = [...get().events, { kind: 'user', text }];
     set({ events: withPrompt });
+    // Subscribe BEFORE the invoke: event delivery races the final list.
+    const unlisten = await listenAiTurnEvents((event) => {
+      if (!get().busy) return; // a late straggler after teardown
+      set({ events: [...get().events, { kind: 'agent' as const, ...event }] });
+    });
     try {
       const agentEvents = await aiChat(historyOf(withPrompt), text);
-      set({ events: [...get().events, ...agentEvents.map((event) => ({ kind: 'agent' as const, ...event }))] });
+      // Stop the stream before settling: a straggler payload that arrives
+      // between the invoke resolving and this point must not append after
+      // the authoritative replace and duplicate the tail.
+      unlisten();
+      set({ events: settleTurn(get().events, agentEvents) });
     } catch (error) {
+      // Tool events that streamed before the failure stay in the
+      // transcript — the turn's work is never thrown away.
       set({ error: error instanceof Error ? error.message : String(error) });
     } finally {
+      try {
+        unlisten();
+      } catch {
+        // Double-unlisten is harmless.
+      }
       set({ busy: false });
     }
   },

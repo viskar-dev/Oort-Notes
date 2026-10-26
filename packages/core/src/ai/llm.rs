@@ -119,6 +119,24 @@ pub struct AgentEvent {
     pub image_base64: Option<String>,
 }
 
+/// Event collector for one turn: the full ordered list is the turn's
+/// authoritative result, while a live sink (when the transport streams)
+/// hands each event over the moment it completes — long turns render
+/// progressively instead of landing as one blob at the end.
+struct AgentOut {
+    events: Vec<AgentEvent>,
+    sink: Option<Box<dyn FnMut(AgentEvent) + Send>>,
+}
+
+impl AgentOut {
+    fn push(&mut self, event: AgentEvent) {
+        if let Some(sink) = self.sink.as_mut() {
+            sink(event.clone());
+        }
+        self.events.push(event);
+    }
+}
+
 impl AgentEvent {
     fn assistant(text: String) -> Self {
         Self { role: "assistant".into(), text, tool: None, ok: None, image_base64: None }
@@ -409,12 +427,34 @@ pub async fn run_agent(
     history: &[HistoryMessage],
     user_message: &str,
 ) -> Result<Vec<AgentEvent>, CoreError> {
+    run_agent_with_sink(client, ctx, history, user_message, None).await
+}
+
+/// Same loop with a live outlet. The returned list is still the authoritative
+/// complete result; the sink only provides early access. A model failure
+/// after some tools ran never discards the transcript: it becomes a system
+/// event and the turn ends with what it produced.
+pub async fn run_agent_with_sink(
+    client: &LlmClient,
+    ctx: &DispatchCtx<'_>,
+    history: &[HistoryMessage],
+    user_message: &str,
+    sink: Option<Box<dyn FnMut(AgentEvent) + Send>>,
+) -> Result<Vec<AgentEvent>, CoreError> {
     let mut messages = build_request_messages(history, user_message);
-    let mut events = Vec::new();
+    let mut out = AgentOut { events: Vec::new(), sink };
     let chat_tools = chat_tools()?;
 
     for _step in 0..MAX_STEPS {
-        let message = client.complete(&messages, &chat_tools).await?;
+        let message = match client.complete(&messages, &chat_tools).await {
+            Ok(message) => message,
+            Err(e) => {
+                // Failure here must not throw away the tools that already
+                // ran: report it inside the transcript instead.
+                out.push(AgentEvent::note(e.to_string()));
+                return Ok(out.events);
+            }
+        };
 
         let native: Vec<ChatCompletionMessageToolCall> = fn_calls(&message).cloned().collect();
         let (final_text, calls) = match message.content.as_deref() {
@@ -422,15 +462,15 @@ pub async fn run_agent(
                 if native.is_empty() {
                     let fallback = fallback_tool_calls(text);
                     if fallback.is_empty() {
-                        events.push(AgentEvent::assistant(text.to_string()));
-                        return Ok(events);
+                        out.push(AgentEvent::assistant(text.to_string()));
+                        return Ok(out.events);
                     }
                     // The model answered in fallback mode: keep its text for
                     // the transcript but continue with the parsed calls.
-                    events.push(AgentEvent::note(text.to_string()));
+                    out.push(AgentEvent::note(text.to_string()));
                     (text.to_string(), fallback)
                 } else {
-                    events.push(AgentEvent::note(clip(text.to_string())));
+                    out.push(AgentEvent::note(clip(text.to_string())));
                     (text.to_string(), native)
                 }
             }
@@ -439,11 +479,11 @@ pub async fn run_agent(
 
         if calls.is_empty() {
             if final_text.is_empty() {
-                events.push(AgentEvent::assistant(
+                out.push(AgentEvent::assistant(
                     "(the model returned nothing)".to_string(),
                 ));
             }
-            return Ok(events);
+            return Ok(out.events);
         }
 
         // Echo the assistant message (with its tool calls) into the history.
@@ -478,18 +518,21 @@ pub async fn run_agent(
             // Screenshots split three ways: a text summary for the display and
             // the model's tool message, a display payload for the chat UI, and
             // the actual image as a content part for the next model step.
-            let (result, model_image, display_image) = match super::dispatch::dispatch(ctx, &name, args).await {
+            let (ok, content, model_image, display_image) =
+                match super::dispatch::dispatch(ctx, &name, args).await {
                 Ok(value) => {
                     let (summary, attached) = split_image(&value);
                     let display = value
                         .get("image_base64")
                         .and_then(Value::as_str)
                         .map(String::from);
-                    (summary.to_string(), attached, display)
+                    (true, summary.to_string(), attached, display)
                 }
-                Err(e) => (e.to_string(), None, None),
+                // A failing tool is a transcript event the user can see (and
+                // the model reads as its tool result), not a lost turn.
+                Err(e) => (false, e.to_string(), None, None),
             };
-            events.push(AgentEvent::tool(name.clone(), true, clip(result.clone()), display_image));
+            out.push(AgentEvent::tool(name.clone(), ok, clip(content.clone()), display_image));
             if let Some(data_url) = model_image {
                 messages.push(
                     ChatCompletionRequestToolMessage {
@@ -522,7 +565,7 @@ pub async fn run_agent(
             } else {
                 messages.push(
                     ChatCompletionRequestToolMessage {
-                        content: result.into(),
+                        content: content.into(),
                         tool_call_id: call.id.clone(),
                     }
                     .into(),
@@ -535,15 +578,40 @@ pub async fn run_agent(
         }
     }
 
-    events.push(AgentEvent::note(format!(
+    out.push(AgentEvent::note(format!(
         "Stopped after {MAX_STEPS} tool batches without a final answer — continue the conversation to finish."
     )));
-    Ok(events)
+    Ok(out.events)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Arc, Mutex};
+
+    #[test]
+    fn agent_out_streams_every_event_and_keeps_the_full_list() {
+        let streamed = Arc::new(Mutex::new(Vec::new()));
+        let log = Arc::clone(&streamed);
+        let mut out = AgentOut {
+            events: Vec::new(),
+            // Move the log into the closure: Box<dyn FnMut> is 'static and
+            // cannot borrow test locals (this is the same shape the desktop
+            // transport uses).
+            sink: Some(Box::new(move |event: AgentEvent| {
+                log.lock().unwrap().push(event);
+            })),
+        };
+        out.push(AgentEvent::note("one".into()));
+        out.push(AgentEvent::assistant("two".into()));
+        assert_eq!(out.events.len(), 2, "the list stays the turn's authority");
+        assert_eq!(streamed.lock().unwrap().len(), 2, "the sink saw everything");
+        assert_eq!(streamed.lock().unwrap()[0].text, "one");
+        // No sink: collection only.
+        let mut silent = AgentOut { events: Vec::new(), sink: None };
+        silent.push(AgentEvent::assistant("three".into()));
+        assert_eq!(silent.events.len(), 1);
+    }
 
     #[test]
     fn fenced_json_array_is_parsed() {

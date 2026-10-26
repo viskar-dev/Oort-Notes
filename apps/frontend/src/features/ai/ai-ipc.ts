@@ -7,6 +7,7 @@
  */
 
 import { invoke } from '@tauri-apps/api/core';
+import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 
 /** One event of an agent turn, mirroring `note_core::ai::llm::AgentEvent`. */
 export interface AiAgentEvent {
@@ -61,6 +62,15 @@ export function aiChat(
   userMessage: string,
 ): Promise<AiAgentEvent[]> {
   return invoke<AiAgentEvent[]>('ai_chat', { messages, userMessage });
+}
+
+/** Live agent events while a turn runs (`ai:turn-event`). Events streamed
+ *  here are advisory — the turn's final list (returned by `aiChat`) is the
+ *  authoritative transcript and is applied on completion. */
+export function listenAiTurnEvents(
+  handler: (event: AiAgentEvent) => void,
+): Promise<UnlistenFn> {
+  return listen<AiAgentEvent>('ai:turn-event', (event) => handler(event.payload));
 }
 
 /** Point the AI at this canvas (null clears the pointer).

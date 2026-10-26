@@ -5,7 +5,7 @@
 //! either store it in the OS keychain or report presence as a boolean.
 
 use serde_json::Value;
-use tauri::State;
+use tauri::{Emitter, State};
 use sqlx::SqlitePool;
 
 use note_core::ai::{self, dispatch::DispatchCtx, llm};
@@ -152,11 +152,14 @@ pub async fn rotate_mcp_token(
 // ---------------------------------------------------------------------
 
 /// Run one AI turn with the whole conversation. Returns the ordered event
-/// list for the chat UI. Requires a stored API key.
+/// list for the chat UI — the authoritative result — while streaming each
+/// event to the webview (`ai:turn-event`) as it happens, so long turns
+/// render progressively. Requires a stored API key.
 #[tauri::command]
 pub async fn ai_chat(
     messages: Vec<llm::HistoryMessage>,
     user_message: String,
+    app: tauri::AppHandle,
     pool: State<'_, SqlitePool>,
     bridge: State<'_, std::sync::Arc<DesktopBridge>>,
 ) -> R<Vec<llm::AgentEvent>> {
@@ -169,9 +172,20 @@ pub async fn ai_chat(
 
     let client = llm::LlmClient::new(&config.base_url, &config.model, &api_key);
     let ctx = DispatchCtx { pool: &pool, bridge: Some(bridge.as_ref()) };
-    llm::run_agent(&client, &ctx, &messages, &user_message)
-        .await
-        .map_err(map)
+    let emitter = app.clone();
+    ai::llm::run_agent_with_sink(
+        &client,
+        &ctx,
+        &messages,
+        &user_message,
+        Some(Box::new(move |event| {
+            // A webview without the listener (or mid-teardown) simply misses
+            // it; the final list is the turn's authority.
+            let _ = emitter.emit("ai:turn-event", &event);
+        })),
+    )
+    .await
+    .map_err(map)
 }
 
 // ---------------------------------------------------------------------
