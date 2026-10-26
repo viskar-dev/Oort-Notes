@@ -183,6 +183,11 @@ pub struct CreateDiagramArgs {
 pub struct CreateShapesArgs {
     /// Partial tldraw shape objects: `{ "type": "geo", "x": 0, "y": 0, "props": { ... } }`.
     pub shapes: Vec<serde_json::Value>,
+    /// Where x/y-less shapes are placed relative to existing content
+    /// ('left' | 'right' | 'above' | 'below', default 'below'); they are
+    /// clamped into the compose region (the open page sheet in pages mode).
+    /// Entries with explicit x/y are honored exactly.
+    pub side: Option<String>,
 }
 
 /// Partially update existing shapes by id.

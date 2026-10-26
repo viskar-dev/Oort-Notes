@@ -101,7 +101,7 @@ export async function executeAiTool(
     case 'create_diagram':
       return createDiagram(deps, args);
     case 'create_shapes':
-      return createShapes(deps.editor, args);
+      return createShapes(deps, args);
     case 'update_shapes':
       return updateShapes(deps.editor, args);
     case 'delete_shapes':
@@ -616,33 +616,95 @@ function createDiagram(deps: AiExecutorDeps, args: ToolArgs): ToolValue {
   };
 }
 
-function createShapes(editor: Editor, args: ToolArgs): ToolValue {
-  const entries = asArray(args, 'shapes');
-  const created: string[] = [];
+/** Rough planned footprint for one create_shapes entry. Placement only —
+ *  blocks auto-fit their real height right after creation (geo carries its
+ *  real w/h in props; that is validated before this runs). */
+function plannedSize(type: string, props: ToolArgs): { w: number; h: number } {
+  const w = typeof props.w === 'number' && Number.isFinite(props.w) ? props.w : 0;
+  const h = typeof props.h === 'number' && Number.isFinite(props.h) ? props.h : 0;
+  if (w > 0 && h > 0) return { w, h };
+  const text = typeof props.text === 'string' ? props.text : '';
+  switch (type) {
+    case 'text':
+      return { w: 240, h: Math.max(42, textLines(text) * 36 + 6) };
+    case 'frame':
+      return { w: 480, h: 360 };
+    case 'arrow':
+    case 'line':
+      return { w: 180, h: 32 };
+    case 'svg-diagram':
+      return { w: 320, h: 240 };
+    default:
+      return { w: 120, h: 120 };
+  }
+}
+
+/** An entry position set by the model itself (honored exactly, no planning). */
+const hasExplicitXY = (entry: ToolArgs): boolean =>
+  typeof entry.x === 'number' && Number.isFinite(entry.x) &&
+  typeof entry.y === 'number' && Number.isFinite(entry.y);
+
+function createShapes(deps: AiExecutorDeps, args: ToolArgs): ToolValue {
+  const editor = deps.editor;
+  const entries: ToolArgs[] = asArray(args, 'shapes');
+
+  // Validate before any placement math, with the exact messages the
+  // executor has always produced (per-entry, prefixed by the batch index).
   const errors: string[] = [];
+  const ok: Array<{ entry: ToolArgs; index: number; type: string; size: { w: number; h: number } }> = [];
+  entries.forEach((entry, index) => {
+    const type = entry.type;
+    if (typeof type !== 'string' || !CREATE_TYPES.has(type)) {
+      errors.push(`shape ${index}: type must be one of: ${[...CREATE_TYPES].join(', ')}`);
+      return;
+    }
+    const props = entry.props && typeof entry.props === 'object' ? (entry.props as ToolArgs) : {};
+    if (type === 'geo' && (typeof props.w !== 'number' || typeof props.h !== 'number')) {
+      errors.push(`shape ${index}: geo shapes need numeric "w" and "h"`);
+      return;
+    }
+    ok.push({ entry, index, type, size: plannedSize(type, props) });
+  });
+
+  // x/y-less entries used to drop at world origin — off-sheet in pages mode.
+  // They now get the dedicated create_* tools' contract: one column anchored
+  // by planPlacement (below existing content, side-honored) and clamped into
+  // the compose region, keeping the batch's relative offsets.
+  let cursor: { x: number; y: number } | null = null;
+  if (ok.some((it) => !hasExplicitXY(it.entry))) {
+    const batchW = Math.max(...ok.map((it) => it.size.w));
+    const batchH = ok.reduce((sum, it) => sum + it.size.h + LAYOUT_GAP, -LAYOUT_GAP);
+    const anchor = planPlacement(editor, deps, args, batchW, batchH);
+    cursor = { x: anchor.x, y: anchor.y };
+  }
+
+  const created: string[] = [];
   editor.run(() => {
-    entries.forEach((entry, index) => {
+    for (const { entry, index, type, size } of ok) {
       try {
-        const type = entry.type;
-        if (typeof type !== 'string' || !CREATE_TYPES.has(type)) {
-          throw new Error(`type must be one of: ${[...CREATE_TYPES].join(', ')}`);
-        }
         const id = typeof entry.id === 'string' && entry.id.startsWith('shape:')
           ? (entry.id as TLShapeId)
           : newShapeId();
-        const x = typeof entry.x === 'number' && Number.isFinite(entry.x) ? entry.x : 0;
-        const y = typeof entry.y === 'number' && Number.isFinite(entry.y) ? entry.y : 0;
-        const props = entry.props && typeof entry.props === 'object' ? entry.props : {};
-        const shape = { id, type, x, y, props } as Parameters<Editor['createShape']>[0];
-        if (type === 'geo' && (typeof (props as ToolArgs).w !== 'number' || typeof (props as ToolArgs).h !== 'number')) {
-          throw new Error("geo shapes need numeric \"w\" and \"h\"");
+        let x: number;
+        let y: number;
+        if (cursor === null) {
+          // Every entry is explicit: no planning touched the coordinates.
+          x = typeof entry.x === 'number' && Number.isFinite(entry.x) ? entry.x : 0;
+          y = typeof entry.y === 'number' && Number.isFinite(entry.y) ? entry.y : 0;
+        } else if (hasExplicitXY(entry)) {
+          x = entry.x;
+          y = entry.y;
+        } else {
+          x = cursor.x;
+          y = cursor.y;
+          cursor.y += size.h + LAYOUT_GAP;
         }
-        editor.createShape(shape);
+        editor.createShape({ id, type, x, y, props: entry.props && typeof entry.props === 'object' ? entry.props : {} } as Parameters<Editor['createShape']>[0]);
         created.push(id);
       } catch (error) {
         errors.push(`shape ${index}: ${error instanceof Error ? error.message : String(error)}`);
       }
-    });
+    }
   });
   if (created.length === 0 && errors.length > 0) {
     throw new Error(errors[0]);

@@ -121,7 +121,7 @@ pub fn all_tools() -> Vec<ToolDef> {
         ),
         def!(
             "create_shapes",
-            "Create one or more basic tldraw shapes from partial shape objects ({\"type\": \"geo\"|\"text\"|\"note\"|\"arrow\"|\"line\"|\"frame\"|\"svg-diagram\", \"x\":, \"y\":, \"props\": {...}}); geo shapes need props with numeric w and h. Best for plain geometry and for frames that contain later blocks. Use the dedicated create_* tools for code, math, tables and cards.",
+            "Create one or more basic tldraw shapes from partial shape objects ({\"type\": \"geo\"|\"text\"|\"note\"|\"arrow\"|\"line\"|\"frame\"|\"svg-diagram\", \"x\":, \"y\":, \"props\": {...}}); geo shapes need props with numeric w and h. Entries without x/y are placed deterministically below existing content (use \"side\" for left/right/above) and clamped inside the open page sheet — never pass x/y you did not measure. Entries with explicit x/y are honored exactly. Best for plain geometry and for frames that contain later blocks. Use the dedicated create_* tools for code, math, tables and cards.",
             a::CreateShapesArgs, false, false, frontend
         ),
         def!(

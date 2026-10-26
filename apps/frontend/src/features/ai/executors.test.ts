@@ -103,4 +103,92 @@ describe('executeAiTool routing', () => {
     expect(requests).toHaveLength(1);
     expect(editor.deleteShapes).not.toHaveBeenCalled();
   }, 5000);
+
+  // -----------------------------------------------------------------
+  // create_shapes placement
+  // -----------------------------------------------------------------
+
+  /** Editor that reports one content block (100..300 × 100..200) and a
+   *  1600×1000 viewport, the minimum the placement math touches. */
+  function placedDeps(): { deps: AiExecutorDeps; editor: AiExecutorDeps['editor'] } {
+    const editor = {
+      ...makeEditor(),
+      getCurrentPageShapeIds: vi.fn(() => new Set(['shape:a'])),
+      getShape: vi.fn(() => ({ id: 'shape:a' })),
+      getShapePageBounds: vi.fn(() => ({ minX: 100, minY: 100, maxX: 300, maxY: 200, w: 200, h: 100 })),
+      getViewportPageBounds: vi.fn(() => ({ x: 0, y: 0, w: 1600, h: 1000 })),
+      createShape: vi.fn(),
+    } as unknown as AiExecutorDeps['editor'];
+    return { editor, deps: { ...deps(), editor } };
+  }
+
+  it('places x/y-less entries as a column below existing content', async () => {
+    const { editor, deps: d } = placedDeps();
+    await executeAiTool(d, 'create_shapes', { shapes: [{ type: 'text' }, { type: 'text' }] });
+    // Batch anchor: content right edge + gap, aligned with content top —
+    // both planned shapes share the column x; offsets keep their order.
+    const codes = editor.createShape.mock.calls.map((c) => ({ x: c[0].x, y: c[0].y }));
+    expect(codes).toHaveLength(2);
+    expect(codes[0]).toEqual({ x: expect.closeTo(80, 0), y: expect.closeTo(272, 0) });
+    expect(codes[1]).toEqual({ x: expect.closeTo(80, 0), y: expect.closeTo(386, 0) });
+    // Nothing was dropped at world origin.
+    expect(codes.every((p) => p.x !== 0 || p.y !== 0)).toBe(true);
+  });
+
+  it('honors explicit x/y exactly and skips planning for them', async () => {
+    const { editor, deps: d } = placedDeps();
+    const result = await executeAiTool(d, 'create_shapes', {
+      shapes: [{ type: 'geo', x: -77, y: 1234, props: { w: 10, h: 10 } }],
+    });
+    expect(result.created).toHaveLength(1);
+    expect(editor.createShape.mock.calls[0][0]).toMatchObject({ x: -77, y: 1234 });
+    // Explicit positions are never clamped or moved: no region read at all.
+    expect(editor.getViewportPageBounds).not.toHaveBeenCalled();
+  });
+
+  it('plans only the x/y-less entries in a mixed batch', async () => {
+    const { editor, deps: d } = placedDeps();
+    await executeAiTool(d, 'create_shapes', {
+      shapes: [
+        { type: 'geo', x: 500, y: 900, props: { w: 60, h: 60 } },
+        { type: 'text' },
+      ],
+    });
+    const calls = editor.createShape.mock.calls.map((c) => ({ type: c[0].type, x: c[0].x, y: c[0].y }));
+    expect(calls[0]).toMatchObject({ type: 'geo', x: 500, y: 900 });
+    expect(calls[1]).toMatchObject({ type: 'text' });
+    expect(calls[1].x).not.toBe(0);
+  });
+
+  it('respects side for the planned anchor', async () => {
+    const { editor, deps: d } = placedDeps();
+    await executeAiTool(d, 'create_shapes', {
+      shapes: [{ type: 'text' }, { type: 'geo', x: 0, y: 0, props: { w: 1, h: 1 } }],
+      side: 'right',
+    });
+    const text = editor.createShape.mock.calls[0][0];
+    // content.x + content.w + LAYOUT_GAP = 372, vertically on content top.
+    expect(text.x).toBeCloseTo(372, 0);
+    expect(text.y).toBeCloseTo(100, 0);
+  });
+
+  it('reports validation errors while still creating valid entries', async () => {
+    const { editor, deps: d } = placedDeps();
+    const result = await executeAiTool(d, 'create_shapes', {
+      shapes: [{ type: 'icon' }, { type: 'text' }],
+    });
+    expect(result.created).toHaveLength(1);
+    expect(result.errors).toEqual([
+      expect.stringContaining('shape 0: type must be one of'),
+    ]);
+    expect(editor.createShape).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects an all-invalid batch with the first error', async () => {
+    const { editor, deps: d } = placedDeps();
+    await expect(
+      executeAiTool(d, 'create_shapes', { shapes: [{ type: 'geo', props: { w: 4 } }] }),
+    ).rejects.toThrow('geo shapes need numeric "w" and "h"');
+    expect(editor.createShape).not.toHaveBeenCalled();
+  });
 });
