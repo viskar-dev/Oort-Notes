@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { HardDriveDownload, Sparkles, type LucideIcon } from 'lucide-react';
 import { isTauri } from '@tauri-apps/api/core';
 import { Bot } from 'lucide-react';
-import { APP_CONTAINER, WorkspaceLayout } from '@/components/layout/workspace-layout';
+import { HOME_CONTAINER, WorkspaceLayout } from '@/components/layout/workspace-layout';
 
 export type SettingsSection = 'presets' | 'backup' | 'ai';
 
@@ -22,8 +22,8 @@ function visibleSections(): typeof SECTIONS {
 
 /**
  * Settings shell: the same workspace chrome (navbar + breadcrumb) with a
- * section nav on the left and the section content on the right, both on the
- * shared max-w-7xl rhythm.
+ * section nav on the left and the section content on the right, on the
+ * shared max-w-6xl rhythm used by the rest of the app pages.
  */
 export function SettingsLayout({
   section,
@@ -37,8 +37,8 @@ export function SettingsLayout({
     section === 'presets'
       ? [{ label: 'Settings' }]
       : [{ label: 'Settings', to: '/settings' }, { label: current.label }];  return (
-    <WorkspaceLayout crumbs={crumbs} flat>
-      <div className={`${APP_CONTAINER} flex flex-1 items-start gap-12 pb-16 pt-10`}>
+    <WorkspaceLayout crumbs={crumbs} flat container={HOME_CONTAINER}>
+      <div className={`${HOME_CONTAINER} flex flex-1 items-start gap-12 pb-16 pt-10 `}>
         <aside className="w-48 shrink-0" aria-label="Settings">
           <div className="mb-2 px-3 text-xs font-medium tracking-widest text-muted-foreground">
             SETTINGS
