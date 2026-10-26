@@ -221,6 +221,11 @@ pub struct SnapshotArgs {}
 pub struct ListCanvasesArgs {
     /// Optional case-insensitive filter on chapter or notebook name.
     pub query: Option<String>,
+    /// Skip this many canvases (newest edit first); used to page past the
+    /// result cap together with `limit`.
+    pub offset: Option<u32>,
+    /// How many canvases to return (default 50, at most 200).
+    pub limit: Option<u32>,
 }
 
 /// Read the active canvas pointer.

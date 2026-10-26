@@ -143,29 +143,41 @@ async fn rust_tool(ctx: &DispatchCtx<'_>, name: &str, args: Value) -> Result<Val
                 .as_deref()
                 .map(|q| format!("%{}%", q.trim().to_lowercase()))
                 .unwrap_or_else(|| "%".to_string());
-            let rows: Vec<(String, String, String, i64, String)> = sqlx::query_as(
-                "SELECT c.id, c.name, c.canvas_type, c.updated_at, n.name
+            let limit = args.limit.unwrap_or(50).clamp(1, 200);
+            let offset = args.offset.unwrap_or(0);
+            let rows: Vec<(String, String, String, i64, String, String, i64, i64)> = sqlx::query_as(
+                "SELECT c.id, c.name, c.canvas_type, c.updated_at, n.id, n.name,
+                  (SELECT COUNT(*) FROM topics t
+                     WHERE t.chapter_id = c.id AND t.deleted_at IS NULL) AS topic_count,
+                  (SELECT COUNT(*) FROM topic_pages p JOIN topics t2 ON t2.id = p.topic_id
+                     WHERE t2.chapter_id = c.id AND t2.deleted_at IS NULL) AS page_count
                  FROM chapters c JOIN notebooks n ON n.id = c.notebook_id
                  WHERE c.deleted_at IS NULL AND n.deleted_at IS NULL
-                   AND (lower(c.name) LIKE ? OR lower(n.name) LIKE ?)
+                   AND (lower(c.name) LIKE ?1 OR lower(n.name) LIKE ?1)
                  ORDER BY c.updated_at DESC
-                 LIMIT 50",
+                 LIMIT ?2 OFFSET ?3",
             )
             .bind(&pattern)
-            .bind(&pattern)
+            .bind(limit)
+            .bind(offset)
             .fetch_all(ctx.pool)
             .await?;
             let canvases: Vec<Value> = rows
                 .into_iter()
-                .map(|(id, name, canvas_type, updated_at, notebook)| {
-                    serde_json::json!({
-                        "id": id,
-                        "name": name,
-                        "notebook": notebook,
-                        "canvas_type": canvas_type,
-                        "updated_at": updated_at,
-                    })
-                })
+                .map(
+                    |(id, name, canvas_type, updated_at, notebook_id, notebook, topic_count, page_count)| {
+                        serde_json::json!({
+                            "id": id,
+                            "name": name,
+                            "notebook": notebook,
+                            "notebook_id": notebook_id,
+                            "canvas_type": canvas_type,
+                            "updated_at": updated_at,
+                            "topic_count": topic_count,
+                            "page_count": page_count,
+                        })
+                    },
+                )
                 .collect();
             Ok(serde_json::json!({ "canvases": canvases }))
         }

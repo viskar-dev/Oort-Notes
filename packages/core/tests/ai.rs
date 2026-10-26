@@ -296,15 +296,46 @@ async fn get_active_canvas_reports_the_open_canvas() {
 #[tokio::test]
 async fn list_canvases_joins_notebook_names() {
     let (pool, notebook, chapter) = seed().await;
+    // A second chapter in its own notebook, plus a topic with two pages:
+    // chapter-level counts must reflect this structure.
+    let note2 = repo::create_notebook(&pool, &new_id(), "Empty", None, None, None)
+        .await
+        .unwrap();
+    repo::create_chapter(
+        &pool,
+        &new_id(),
+        &note2.id,
+        "Superscripts",
+        "infinite",
+        Some("a4-portrait"),
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+    let topic = repo::create_topic(&pool, &new_id(), &chapter.id, "Reflection")
+        .await
+        .unwrap();
+    repo::create_topic_page(&pool, &new_id(), &topic.id, "Page 1").await.unwrap();
+    repo::create_topic_page(&pool, &new_id(), &topic.id, "Page 2").await.unwrap();
     let ctx = DispatchCtx { pool: &pool, bridge: None };
 
     let value = dispatch(&ctx, "list_canvases", json!({})).await.unwrap();
     let canvases = value["canvases"].as_array().unwrap();
-    assert_eq!(canvases.len(), 1);
-    assert_eq!(canvases[0]["id"], chapter.id.as_str());
-    assert_eq!(canvases[0]["name"], "Kinematics");
-    assert_eq!(canvases[0]["notebook"], notebook.name);
-    assert_eq!(canvases[0]["canvas_type"], "page");
+    assert_eq!(canvases.len(), 2);
+    let kinematics = canvases.iter().find(|c| c["name"] == "Kinematics").unwrap();
+    assert_eq!(kinematics["id"], chapter.id.as_str());
+    assert_eq!(kinematics["notebook"], notebook.name);
+    assert_eq!(kinematics["notebook_id"], notebook.id.as_str());
+    assert_eq!(kinematics["canvas_type"], "page");
+    assert_eq!(kinematics["topic_count"], 1);
+    assert_eq!(kinematics["page_count"], 2);
+    let empty = canvases.iter().find(|c| c["name"] == "Superscripts").unwrap();
+    assert_eq!(empty["topic_count"], 0);
+    assert_eq!(empty["page_count"], 0);
 
     // Query filters case-insensitively across chapter and notebook names.
     let value = dispatch(&ctx, "list_canvases", json!({ "query": "KINEM" }))
@@ -316,6 +347,15 @@ async fn list_canvases_joins_notebook_names() {
         .await
         .unwrap();
     assert!(value["canvases"].as_array().unwrap().is_empty());
+
+    // Pagination: one page at a time covers the whole set, no duplicates.
+    let first = dispatch(&ctx, "list_canvases", json!({ "limit": 1 })).await.unwrap();
+    let second = dispatch(&ctx, "list_canvases", json!({ "limit": 1, "offset": 1 })).await.unwrap();
+    let rest = dispatch(&ctx, "list_canvases", json!({ "limit": 1, "offset": 2 })).await.unwrap();
+    let first_row = &first["canvases"][0];
+    let second_row = &second["canvases"][0];
+    assert_ne!(first_row["id"], second_row["id"], "offset pages without overlap");
+    assert!(rest["canvases"].as_array().unwrap().is_empty(), "past the end");
 }
 
 #[tokio::test]

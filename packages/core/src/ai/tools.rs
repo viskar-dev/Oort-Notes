@@ -142,7 +142,7 @@ pub fn all_tools() -> Vec<ToolDef> {
         // Rust side
         def!(
             "list_canvases",
-            "List the user's canvases (chapters) across notebooks: id, name, notebook, canvas type and last edit time. Use it to find which canvas the user is talking about.",
+            "List the user's canvases (chapters) across notebooks: id, name, notebook id and name, canvas type and last edit time; page-type chapters also report their topic count and total page count. Use it to find which canvas the user is talking about. Results are newest-edit first; use offset and limit (default 50, at most 200) to page through instead of assuming one page holds everything.",
             a::ListCanvasesArgs, false, false, rust
         ),
         def!(
