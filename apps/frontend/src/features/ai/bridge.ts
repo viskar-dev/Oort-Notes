@@ -65,6 +65,7 @@ export const EXECUTED_TOOLS = [
   'get_snapshot',
   'get_screenshot',
   'create_note',
+  'create_text',
   'create_math_block',
   'create_code_block',
   'create_table',

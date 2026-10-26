@@ -83,6 +83,7 @@ fn validate_args(name: &str, args: Value) -> Result<(), CoreError> {
         "get_shape" => serde_json::from_value::<a::GetShapeArgs>(args).map(|_| ()),
         "get_screenshot" => serde_json::from_value::<a::ScreenshotArgs>(args).map(|_| ()),
         "create_note" => serde_json::from_value::<a::CreateNoteArgs>(args).map(|_| ()),
+        "create_text" => serde_json::from_value::<a::CreateTextArgs>(args).map(|_| ()),
         "create_math_block" => serde_json::from_value::<a::CreateMathBlockArgs>(args).map(|_| ()),
         "create_code_block" => serde_json::from_value::<a::CreateCodeBlockArgs>(args).map(|_| ()),
         "create_table" => serde_json::from_value::<a::CreateTableArgs>(args).map(|_| ()),

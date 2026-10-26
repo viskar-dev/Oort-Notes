@@ -40,8 +40,9 @@ const EVENT_TEXT_LIMIT: usize = 4000;
 
 /// Tools that change the canvas content; batches of these are announced to
 /// the frontend so it can group them into one undo entry.
-const MUTATING_TOOLS: [&str; 10] = [
+const MUTATING_TOOLS: [&str; 11] = [
     "create_note",
+    "create_text",
     "create_math_block",
     "create_code_block",
     "create_table",

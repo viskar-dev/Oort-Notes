@@ -105,6 +105,11 @@ pub fn all_tools() -> Vec<ToolDef> {
             a::CreateCodeBlockArgs, false, false, frontend
         ),
         def!(
+            "create_text",
+            "Write free-standing native text directly on the canvas — a single-style label or headline, not a note box: no background, no border. heading true renders a large title. Multi-line text keeps its line breaks; markdown is not rendered here (use create_note for formatted prose). Returns the created shape with its final x/y.",
+            a::CreateTextArgs, false, false, frontend
+        ),
+        def!(
             "create_table",
             "Create a table. Argument is \"markdown\": a GitHub-flavored table (header row, --- delimiter row, rows); cells may contain $inline math$. Use it for any tabular data instead of approximating tables with notes. Returns the created shape with its final x/y/w/h.",
             a::CreateTableArgs, false, false, frontend

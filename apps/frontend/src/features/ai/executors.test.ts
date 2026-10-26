@@ -54,6 +54,21 @@ describe('executeAiTool routing', () => {
     ).rejects.toThrow('"text" is required');
   });
 
+  it('create_text places native text and applies heading scale', async () => {
+    const { editor, deps: d } = placedDeps();
+    const value = await executeAiTool(d, 'create_text', { text: 'Optics', heading: true });
+    expect((value.created as string).startsWith('shape:')).toBe(true);
+    const created = editor.createShape.mock.calls[0][0];
+    expect(created.type).toBe('text');
+    expect(created.props.scale).toBe(2);
+    expect(created.props.autoSize).toBe(true);
+    // Heading text anchors below the content block, inside the viewport.
+    expect(created.y).toBeGreaterThan(200);
+    expect(created.y).toBeLessThan(1000);
+
+    await expect(executeAiTool(d, 'create_text', { x: 5 })).rejects.toThrow('"text" is required');
+  });
+
   it('get_shape returns the full unclipped state of one shape', async () => {
     const longCode = 'x = 1\n'.repeat(500); // ~3000 chars, far past the outline clip
     const editor = {

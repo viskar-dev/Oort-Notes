@@ -99,6 +99,23 @@ pub struct CreateTableArgs {
     pub width: Option<f64>,
 }
 
+/// Write native single-style text directly on the canvas.
+#[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
+pub struct CreateTextArgs {
+    /// The text to write. Line breaks are kept; markdown is not rendered —
+    /// use create_note for formatted prose.
+    pub text: String,
+    /// Render heading-style (about twice the default size).
+    pub heading: Option<bool>,
+    /// World x position (unset ⇒ placed automatically beside existing content).
+    pub x: Option<f64>,
+    /// World y position (unset ⇒ placed automatically beside existing content).
+    pub y: Option<f64>,
+    /// Where to put the text relative to existing content
+    /// ('left' | 'right' | 'above' | 'below', default 'below').
+    pub side: Option<String>,
+}
+
 /// Create a callout card: a titled highlight box with an accent color and
 /// an icon.
 #[derive(Debug, Clone, Default, Deserialize, JsonSchema)]

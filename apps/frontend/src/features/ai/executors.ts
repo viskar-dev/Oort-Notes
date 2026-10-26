@@ -35,6 +35,7 @@ export interface AiCanvasContext {
 /** Tools the AI may call that change the canvas. Rejected in view mode. */
 const MUTATING_TOOLS = new Set([
   'create_note',
+  'create_text',
   'create_math_block',
   'create_code_block',
   'create_table',
@@ -90,6 +91,8 @@ export async function executeAiTool(
       return await screenshot(deps.editor, args);
     case 'create_note':
       return createNote(deps, args);
+    case 'create_text':
+      return createText(deps, args);
     case 'create_math_block':
       return createMathBlock(deps, args);
     case 'create_code_block':
@@ -354,6 +357,30 @@ function createNote(deps: AiExecutorDeps, args: ToolArgs): ToolValue {
       const scale = Math.max(0.35, Math.min(4, w / DEFAULT_NOTE_W));
       editor.updateShape({ id, type: 'note', props: { scale } });
     }
+  });
+  return { created: id, x: round(at.x), y: round(at.y), w: round(w), h: round(h) };
+}
+
+/** Native free-standing text: one style, no box, auto-sized. The rough w/h
+ *  estimate only feeds the placement clamps; tldraw measures for real. */
+function createText(deps: AiExecutorDeps, args: ToolArgs): ToolValue {
+  const editor = deps.editor;
+  const text = requiredText(args);
+  const scale = args.heading === true ? 2 : 1;
+  const lines = Math.max(1, textLines(text));
+  const longest = Math.max(...text.split(/\r?\n/).map((l) => l.length), 1);
+  const w = Math.min(1200, Math.max(60, longest * 7.2 * scale));
+  const h = Math.min(2000, lines * 36 * scale + 8);
+  const at = planPlacement(editor, deps, args, w, h);
+  const id = newShapeId();
+  editor.run(() => {
+    editor.createShape({
+      id,
+      type: 'text',
+      x: at.x,
+      y: at.y,
+      props: { richText: toRichText(text) as never, autoSize: true, scale },
+    });
   });
   return { created: id, x: round(at.x), y: round(at.y), w: round(w), h: round(h) };
 }
