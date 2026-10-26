@@ -6,6 +6,12 @@ import { isTauri } from '@tauri-apps/api/core';
  *  app navbar (h-14) so the native caption buttons (window controls) align
  *  inside the same band on every screen. */
 const CHROME_BAND_PX = 56;
+/** Pointer must travel this far below the band before the chrome may hide —
+ *  stops the in/out thrash when grazing the band edge. */
+const HYSTERESIS_PX = 24;
+/** Grace before hiding after the pointer leaves the band (keeps the fade
+ *  from firing while sweeping across the canvas just below the band). */
+const HIDE_DELAY_MS = 120;
 
 /** Page-chapter actions at the top-right: page pager + settings (View mode
  *  moved into the ⋮ menu's Preferences submenu, Ctrl+Alt+V). */
@@ -47,8 +53,9 @@ export function CanvasTopBar({
   onOpenAi,
 }: CanvasTopBarProps) {
   /* Desktop: the whole canvas header — app buttons AND the native window
-     caption panel — is one hover-revealed layer, navbar-style. Web builds
-     keep it always visible. */
+     caption panel — is one hover-revealed layer floating OVER the canvas
+     (the canvas takes the full window; the chrome owns nothing in flow).
+     Web builds keep it always visible. */
   const [revealed, setRevealed] = useState(!isTauri());
   const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -57,25 +64,24 @@ export function CanvasTopBar({
     hideTimer.current = null;
     setRevealed(true);
   };
-  // short delay so grazing the band edge doesn't flicker
   const scheduleHide = () => {
     if (hideTimer.current !== null) clearTimeout(hideTimer.current);
     hideTimer.current = setTimeout(() => {
       hideTimer.current = null;
       setRevealed(false);
-    }, 350);
+    }, HIDE_DELAY_MS);
   };
 
   /* Geometry-based reveal (pointer inside the top band) instead of
      over/out listeners: the plugin's caption buttons overlay this band with
      their own hit targets, so :hover on the bar alone would flicker /
-     never fire inside the button region. mousemove keeps the layer lit
-     across the whole band, buttons included. */
+     never fire inside the button region. */
   useEffect(() => {
     if (!isTauri()) return;
     const onMove = (e: MouseEvent) => {
       if (e.clientY <= CHROME_BAND_PX) reveal();
-      else scheduleHide();
+      else if (e.clientY > CHROME_BAND_PX + HYSTERESIS_PX) scheduleHide();
+      // inside the hysteresis margin: hold the current state
     };
     document.addEventListener('mousemove', onMove);
     return () => {
@@ -92,19 +98,20 @@ export function CanvasTopBar({
     document.body.classList.toggle('canvas-chrome-hidden', !revealed);
   }, [revealed]);
 
-  /* Infinite canvases: no name strip — a hover-revealed bar with Back +
-     AI + Settings; the native caption panel completes the band top-right
-     (clearance below). Hidden ⇒ pointer-transparent, canvas untouched
-     except the always-active drag strip underneath. */
+  /* Both chapters are overlays on the full-size canvas: an invisible
+     always-active strip keeps window dragging while the chrome is hidden,
+     and the revealed bar sits above it in DOM order (clickable). The strip
+     must never catch clicks intended for the bar. */
   if (!strip) {
     return (
-      <div className="pointer-events-none absolute inset-x-0 top-0 z-40 h-14">
+      <div
+        className="pointer-events-none absolute inset-x-0 top-0 z-40 h-14"
+        onFocusCapture={reveal}
+      >
         <div data-tauri-drag-region className="pointer-events-auto absolute inset-0" />
         <div
-          data-tauri-drag-region
-          onFocusCapture={reveal}
-          className={`relative flex h-full items-center justify-between border-b border-line bg-surface pl-3 pr-[max(12px,var(--tauri-plugin-decoration-right-clearance,0px))] transition-opacity duration-200 ${
-            revealed ? 'opacity-100' : 'pointer-events-none opacity-0'
+          className={`relative flex h-full items-center justify-between border-b border-line bg-surface pl-3 pr-[max(8px,var(--tauri-plugin-decoration-right-clearance,0px))] transition-opacity duration-150 ${
+            revealed ? 'pointer-events-auto opacity-100' : 'pointer-events-none opacity-0'
           }`}
         >
           <button
@@ -139,20 +146,19 @@ export function CanvasTopBar({
     );
   }
   return (
-    /* page chapters: a solid header — chapter name, tldraw menu triggers,
-       page pager, AI, Settings; the native window controls land in the
-       same band (clearance reserved). Hover-only on desktop: the invisible
-       strip underneath keeps window dragging while the header is hidden. */
-    <div className="relative shrink-0" onFocusCapture={reveal}>
-      <div data-tauri-drag-region className="absolute inset-0 top-0" />
+    <div
+      className="pointer-events-none absolute inset-x-0 top-0 z-40 h-14"
+      onFocusCapture={reveal}
+    >
+      <div data-tauri-drag-region className="pointer-events-auto absolute inset-0" />
       <header
-        className={`relative z-40 flex h-14 shrink-0 items-center justify-between border-b border-line bg-surface pl-2 pr-[max(8px,var(--tauri-plugin-decoration-right-clearance,0px))] transition-opacity duration-200 ${
-          revealed ? 'opacity-100' : 'pointer-events-none opacity-0'
+        className={`relative flex h-full items-center justify-between border-b border-line bg-surface pl-2 pr-[max(8px,var(--tauri-plugin-decoration-right-clearance,0px))] transition-opacity duration-150 ${
+          revealed ? 'pointer-events-auto opacity-100' : 'pointer-events-none opacity-0'
         }`}
       >
         <div
-          data-tauri-drag-region
           className="flex min-w-0 items-center gap-1.5 text-sm px-2"
+          data-tauri-drag-region
         >
           <button
             title="Back to chapters"

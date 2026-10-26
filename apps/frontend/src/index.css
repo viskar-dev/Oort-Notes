@@ -371,7 +371,7 @@ textarea:focus-visible,
    tauri-plugin-decoration at the top-right of the band) fade together with
    the hover-revealed canvas chrome: CanvasTopBar toggles this body class. */
 [data-tauri-plugin-decoration-root] {
-  transition: opacity 200ms ease;
+  transition: opacity 150ms ease;
 }
 body.canvas-chrome-hidden [data-tauri-plugin-decoration-root],
 body.canvas-chrome-hidden
