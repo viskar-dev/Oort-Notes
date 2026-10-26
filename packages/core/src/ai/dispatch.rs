@@ -96,6 +96,8 @@ fn validate_args(name: &str, args: Value) -> Result<(), CoreError> {
         "create_diagram" => serde_json::from_value::<a::CreateDiagramArgs>(args).map(|_| ()),
         "create_shapes" => serde_json::from_value::<a::CreateShapesArgs>(args).map(|_| ()),
         "add_page" => serde_json::from_value::<a::AddPageArgs>(args).map(|_| ()),
+        "set_page_config" => serde_json::from_value::<a::SetPageConfigArgs>(args).map(|_| ()),
+        "open_canvas" => serde_json::from_value::<a::OpenCanvasArgs>(args).map(|_| ()),
         "update_shapes" => serde_json::from_value::<a::UpdateShapesArgs>(args).map(|_| ()),
         "delete_shapes" => serde_json::from_value::<a::DeleteShapesArgs>(args).map(|_| ()),
         "focus_viewport" => serde_json::from_value::<a::FocusViewportArgs>(args).map(|_| ()),
@@ -185,13 +187,22 @@ async fn rust_tool(ctx: &DispatchCtx<'_>, name: &str, args: Value) -> Result<Val
                 ("page_height", args.page_height),
             ] {
                 if let Some(v) = v {
-                    if v <= 0 || v > 20000 {
+                    // Same range the chapters table CHECK enforces.
+                    if !(200..=20000).contains(&v) {
                         return Err(CoreError::Ai(format!(
-                            "{field} must be between 1 and 20000 (pixels)"
+                            "{field} must be between 200 and 20000 (pixels)"
                         )));
                     }
                 }
             }
+            // A page canvas without a size would render as nothing in the
+            // shell: fall back to the app's default sheet (800×1100).
+            let (page_width, page_height) =
+                if canvas_type == "page" && args.page_width.is_none() && args.page_height.is_none() {
+                    (Some(800), Some(1100))
+                } else {
+                    (args.page_width, args.page_height)
+                };
             // A missing notebook is a clean, readable model error — not a
             // foreign-key leak.
             repo::load_notebook(ctx.pool, &args.notebook_id).await?;
@@ -202,8 +213,8 @@ async fn rust_tool(ctx: &DispatchCtx<'_>, name: &str, args: Value) -> Result<Val
                 name,
                 canvas_type,
                 None,
-                args.page_width,
-                args.page_height,
+                page_width,
+                page_height,
                 None,
                 None,
                 None,
@@ -215,6 +226,66 @@ async fn rust_tool(ctx: &DispatchCtx<'_>, name: &str, args: Value) -> Result<Val
                 "notebook_id": chapter.notebook_id,
                 "canvas_type": chapter.canvas_type,
                 "created": true,
+            }))
+        }
+
+        "set_page_config" => {
+            let args: params::SetPageConfigArgs = tools::parse_args(name, args)?;
+            if args.page_width.is_none() && args.page_height.is_none() {
+                return Err(CoreError::Ai(
+                    "nothing to change — pass page_width and/or page_height".into(),
+                ));
+            }
+            for (field, v) in [
+                ("page_width", args.page_width),
+                ("page_height", args.page_height),
+            ] {
+                if let Some(v) = v {
+                    if !(200..=20000).contains(&v) {
+                        return Err(CoreError::Ai(format!(
+                            "{field} must be between 200 and 20000 (pixels)"
+                        )));
+                    }
+                }
+            }
+            let active = ctx
+                .active_canvas()
+                .await?
+                .ok_or_else(|| CoreError::Ai("no canvas is open — open a canvas in the app first".into()))?;
+            let chapter = repo::load_chapter(ctx.pool, &active.id).await?;
+            if chapter.canvas_type != "page" {
+                return Err(CoreError::Ai(
+                    "only page-type canvases have a sheet size".into(),
+                ));
+            }
+            let width = args.page_width.unwrap_or(chapter.page_width.unwrap_or(800));
+            let height = args.page_height.unwrap_or(chapter.page_height.unwrap_or(1100));
+            repo::set_chapter_page_size(ctx.pool, &chapter.id, Some(width), Some(height)).await?;
+            Ok(serde_json::json!({
+                "updated": true,
+                "page_width": width,
+                "page_height": height,
+                // The running shell builds its layout constants from the
+                // chapter it loaded; a live re-layout would need a shell
+                // reload path.
+                "note": "The open canvas picks the new sheet size up when it is reopened.",
+            }))
+        }
+
+        "open_canvas" => {
+            let args: params::OpenCanvasArgs = tools::parse_args(name, args)?;
+            let chapter = repo::load_chapter(ctx.pool, &args.chapter_id).await?;
+            config::set_active_canvas(ctx.pool, Some(&chapter.id)).await?;
+            // The desktop shell routes to the canvas (an event the webview
+            // listens for); hosts without a canvas bridge only get the pin.
+            if let Some(bridge) = ctx.bridge {
+                bridge.navigate_to_canvas(&chapter.id);
+            }
+            Ok(serde_json::json!({
+                "opened": true,
+                "id": chapter.id,
+                "name": chapter.name,
+                "canvas_type": chapter.canvas_type,
             }))
         }
 

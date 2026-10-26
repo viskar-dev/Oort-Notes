@@ -2,6 +2,7 @@ import { Suspense, lazy, useEffect } from 'react';
 import { BrowserRouter, Navigate, Route, Routes, useNavigate, useParams } from 'react-router-dom';
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { api } from '@/lib/ipc';
+import { useAiNavigation } from '@/features/ai/use-ai-navigation';
 import { RouteErrorBoundary } from '@/pages/route-error-boundary';
 import { RouteError } from '@/pages/route-error';
 
@@ -85,6 +86,16 @@ function BrokenLink() {
   );
 }
 
+/**
+ * Routes the app to the canvas the AI's `open_canvas` points at (desktop
+ * only; the Rust side pins + emits `ai:open-canvas`). Lives inside the
+ * Router context so `useNavigate` works.
+ */
+function AiRouteBridge() {
+  useAiNavigation();
+  return null;
+}
+
 export default function App() {
   // Native window chrome (tauri-plugin-decoration): the window starts
   // hidden; once the document is live we activate the embedded caption
@@ -101,6 +112,7 @@ export default function App() {
     <div style={{ width: '100vw', height: '100vh', margin: 0, padding: 0, position: 'relative' }}>
       <BrowserRouter>
         <Suspense fallback={<LoadingScreen />}>
+          <AiRouteBridge />
           <Routes>
             <Route path="/" element={<NotebooksPage />} errorElement={<RouteErrorBoundary />} />
             <Route path="/notebooks/:notebookId" element={<ChaptersPage />} errorElement={<RouteErrorBoundary />} />

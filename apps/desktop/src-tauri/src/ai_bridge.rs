@@ -125,4 +125,14 @@ impl Bridge for DesktopBridge {
             let _ = window.emit(event, ());
         }
     }
+
+    /// `open_canvas`: the router hook in the webview navigates on this.
+    fn navigate_to_canvas(&self, canvas_id: &str) {
+        if let Some(window) = self.main_window() {
+            let _ = window.emit(
+                "ai:open-canvas",
+                serde_json::json!({ "chapter_id": canvas_id }),
+            );
+        }
+    }
 }

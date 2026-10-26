@@ -71,6 +71,14 @@ impl Bridge for FakeBridge {
     fn notify(&self, event: &'static str) {
         self.notifications.lock().unwrap().push(event.to_string());
     }
+
+    /// `open_canvas` routing is recorded the same way the undo markers are.
+    fn navigate_to_canvas(&self, canvas_id: &str) {
+        self.notifications
+            .lock()
+            .unwrap()
+            .push(format!("open-canvas:{canvas_id}"));
+    }
 }
 
 /// Fresh in-memory database with one notebook and one chapter.
@@ -271,6 +279,97 @@ async fn create_notebook_and_chapter_build_structure() {
     )
     .await
     .unwrap_err();
+    assert!(e.to_string().contains("not found"), "got: {e}");
+}
+
+#[tokio::test]
+async fn set_page_config_updates_the_open_page_canvas() {
+    let (pool, _, chapter) = seed().await; // seed chapter is a page canvas
+    config::set_active_canvas(&pool, Some(&chapter.id)).await.unwrap();
+    let ctx = DispatchCtx { pool: &pool, bridge: None, origin: CallOrigin::Assistant };
+
+    let value = dispatch(&ctx, "set_page_config", json!({ "page_width": 960 }))
+        .await
+        .unwrap();
+    assert_eq!(value["updated"], true);
+    assert_eq!(value["page_width"], 960);
+    assert_eq!(
+        (value["page_height"].as_i64().unwrap() > 0),
+        true,
+        "the omitted side keeps its value"
+    );
+    let loaded = repo::load_chapter(&pool, &chapter.id).await.unwrap();
+    assert_eq!(loaded.page_width, Some(960));
+
+    // Nothing to change → readable error, not a silent no-op.
+    let e = dispatch(&ctx, "set_page_config", json!({})).await.unwrap_err();
+    assert!(e.to_string().contains("nothing to change"));
+
+    // Infinite canvases have no sheets.
+    let note = repo::create_notebook(&pool, &new_id(), "Empty", None, None, None)
+        .await
+        .unwrap();
+    let whiteboard = repo::create_chapter(
+        &pool,
+        &new_id(),
+        &note.id,
+        "Whiteboard",
+        "infinite",
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+    config::set_active_canvas(&pool, Some(&whiteboard.id)).await.unwrap();
+    let e = dispatch(&ctx, "set_page_config", json!({ "page_width": 960 }))
+        .await
+        .unwrap_err();
+    assert!(e.to_string().contains("only page-type canvases"));
+
+    // Off-schema sizes are rejected against the same range the table CHECK
+    // enforces.
+    config::set_active_canvas(&pool, Some(&chapter.id)).await.unwrap();
+    let e = dispatch(&ctx, "set_page_config", json!({ "page_width": 150 }))
+        .await
+        .unwrap_err();
+    assert!(e.to_string().contains("200 and 20000"));
+
+    // No canvas at all.
+    config::set_active_canvas(&pool, None).await.unwrap();
+    let e = dispatch(&ctx, "set_page_config", json!({ "page_width": 960 }))
+        .await
+        .unwrap_err();
+    assert!(e.to_string().contains("no canvas is open"));
+}
+
+#[tokio::test]
+async fn open_canvas_pins_the_canvas_and_routes_the_shell() {
+    let (pool, _, chapter) = seed().await;
+    let bridge = FakeBridge::new(json!({}));
+    let ctx = DispatchCtx { pool: &pool, bridge: Some(&bridge), origin: CallOrigin::Assistant };
+
+    let value = dispatch(&ctx, "open_canvas", json!({ "chapter_id": chapter.id.as_str() }))
+        .await
+        .unwrap();
+    assert_eq!(value["opened"], true);
+    assert_eq!(value["id"], chapter.id.as_str());
+
+    // The pin moved to the opened canvas.
+    let active = ctx.active_canvas().await.unwrap().unwrap();
+    assert_eq!(active.id, chapter.id);
+
+    // And the shell was told to navigate there.
+    let routed = bridge.notifications.lock().unwrap().clone();
+    assert!(routed.contains(&format!("open-canvas:{}", chapter.id)));
+
+    // Unknown chapters surface the repo error, readable for the model.
+    let e = dispatch(&ctx, "open_canvas", json!({ "chapter_id": "nosuch" }))
+        .await
+        .unwrap_err();
     assert!(e.to_string().contains("not found"), "got: {e}");
 }
 

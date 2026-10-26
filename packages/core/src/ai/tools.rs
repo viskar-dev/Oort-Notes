@@ -166,6 +166,16 @@ pub fn all_tools() -> Vec<ToolDef> {
             a::CreateChapterArgs, false, false, rust
         ),
         def!(
+            "set_page_config",
+            "Change the sheet size of the open page-type canvas: page_width and page_height in px (200–20000 each; omit one to keep it). The open canvas picks the new size up when reopened; the reply says so. Fails on infinite/scroll canvases.",
+            a::SetPageConfigArgs, false, false, rust
+        ),
+        def!(
+            "open_canvas",
+            "Open a canvas: pin it as the working canvas and navigate the desktop app to it. Use after create_chapter, or when the user asks to switch ('open the optics chapter'). The reply confirms what's now open.",
+            a::OpenCanvasArgs, false, false, rust
+        ),
+        def!(
             "list_canvases",
             "List the user's canvases (chapters) across notebooks: id, name, notebook id and name, canvas type and last edit time; page-type chapters also report their topic count and total page count. Use it to find which canvas the user is talking about. Results are newest-edit first; use offset and limit (default 50, at most 200) to page through instead of assuming one page holds everything.",
             a::ListCanvasesArgs, false, false, rust

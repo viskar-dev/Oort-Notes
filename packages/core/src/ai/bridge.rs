@@ -71,6 +71,11 @@ pub trait Bridge: Send + Sync {
 
     /// Emit a lifecycle notification (grouped undo markers). Optional.
     fn notify(&self, _event: &'static str) {}
+
+    /// Point the desktop app at a canvas after `open_canvas` pinned it.
+    /// Optional and desktop-specific: hosts without routing do nothing —
+    /// the pin makes the canvas the AI's target even if no view switches.
+    fn navigate_to_canvas(&self, _canvas_id: &str) {}
 }
 
 /// Run one frontend tool with the shared timeout, normalizing every failure

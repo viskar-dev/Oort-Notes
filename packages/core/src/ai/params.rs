@@ -282,6 +282,23 @@ pub struct AddPageArgs {
     pub topic_id: Option<String>,
 }
 
+/// Update the open page-type canvas's sheet size.
+#[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
+pub struct SetPageConfigArgs {
+    /// New page width in px (200–20000). Omitted keeps the current value.
+    pub page_width: Option<i64>,
+    /// New page height in px (200–20000). Omitted keeps the current value.
+    pub page_height: Option<i64>,
+}
+
+/// Open a canvas: pin it as the AI's active canvas and point the desktop app
+/// at it.
+#[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
+pub struct OpenCanvasArgs {
+    /// The canvas (chapter) id, from list_canvases or create_chapter.
+    pub chapter_id: String,
+}
+
 /// List canvases (chapters) across all notebooks.
 #[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
 pub struct ListCanvasesArgs {
