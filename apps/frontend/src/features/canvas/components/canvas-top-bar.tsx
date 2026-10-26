@@ -1,5 +1,5 @@
 import { ChevronLeft, ChevronRight, Plus, Settings, Sparkles } from 'lucide-react';
-import { useEffect, useRef, useState, type RefObject } from 'react';
+import { useEffect, useState, type RefObject } from 'react';
 import { isTauri } from '@tauri-apps/api/core';
 
 /** Height of the hover band that reveals the canvas chrome. Matches the
@@ -7,11 +7,9 @@ import { isTauri } from '@tauri-apps/api/core';
  *  inside the same band on every screen. */
 const CHROME_BAND_PX = 56;
 /** Pointer must travel this far below the band before the chrome may hide —
- *  stops the in/out thrash when grazing the band edge. */
+ *  stops the in/out thrash when grazing the band edge (so no hide delay is
+ *  needed: leaving the margin hides instantly). */
 const HYSTERESIS_PX = 24;
-/** Grace before hiding after the pointer leaves the band (keeps the fade
- *  from firing while sweeping across the canvas just below the band). */
-const HIDE_DELAY_MS = 120;
 
 /** Page-chapter actions at the top-right: page pager + settings (View mode
  *  moved into the ⋮ menu's Preferences submenu, Ctrl+Alt+V). */
@@ -57,36 +55,22 @@ export function CanvasTopBar({
      (the canvas takes the full window; the chrome owns nothing in flow).
      Web builds keep it always visible. */
   const [revealed, setRevealed] = useState(!isTauri());
-  const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const reveal = () => {
-    if (hideTimer.current !== null) clearTimeout(hideTimer.current);
-    hideTimer.current = null;
-    setRevealed(true);
-  };
-  const scheduleHide = () => {
-    if (hideTimer.current !== null) clearTimeout(hideTimer.current);
-    hideTimer.current = setTimeout(() => {
-      hideTimer.current = null;
-      setRevealed(false);
-    }, HIDE_DELAY_MS);
-  };
+  const reveal = () => setRevealed(true);
 
-  /* Geometry-based reveal (pointer inside the top band) instead of
-     over/out listeners: the plugin's caption buttons overlay this band with
-     their own hit targets, so :hover on the bar alone would flicker /
-     never fire inside the button region. */
+  /* Instant state flips at the band boundaries only: reveal when the
+     pointer is inside the band, hide the moment it clears the hysteresis
+     margin. Geometry-driven instead of over/out listeners so the plugin's
+     caption buttons (own hit targets, over the band) can't flicker it. */
   useEffect(() => {
     if (!isTauri()) return;
     const onMove = (e: MouseEvent) => {
-      if (e.clientY <= CHROME_BAND_PX) reveal();
-      else if (e.clientY > CHROME_BAND_PX + HYSTERESIS_PX) scheduleHide();
-      // inside the hysteresis margin: hold the current state
+      if (e.clientY <= CHROME_BAND_PX) setRevealed(true);
+      else if (e.clientY > CHROME_BAND_PX + HYSTERESIS_PX) setRevealed(false);
     };
     document.addEventListener('mousemove', onMove);
     return () => {
       document.removeEventListener('mousemove', onMove);
-      if (hideTimer.current !== null) clearTimeout(hideTimer.current);
       document.body.classList.remove('canvas-chrome-hidden');
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -110,8 +94,8 @@ export function CanvasTopBar({
       >
         <div data-tauri-drag-region className="pointer-events-auto absolute inset-0" />
         <div
-          className={`relative flex h-full items-center justify-between border-b border-line bg-surface pl-3 pr-[max(8px,var(--tauri-plugin-decoration-right-clearance,0px))] transition-opacity duration-150 ${
-            revealed ? 'pointer-events-auto opacity-100' : 'pointer-events-none opacity-0'
+          className={`relative flex h-full items-center justify-between border-b border-line bg-surface pl-3 pr-[max(8px,var(--tauri-plugin-decoration-right-clearance,0px))] transition-opacity ${
+            revealed ? 'pointer-events-auto opacity-100 duration-150' : 'pointer-events-none opacity-0 duration-100'
           }`}
         >
           <button
@@ -152,8 +136,8 @@ export function CanvasTopBar({
     >
       <div data-tauri-drag-region className="pointer-events-auto absolute inset-0" />
       <header
-        className={`relative flex h-full items-center justify-between border-b border-line bg-surface pl-2 pr-[max(8px,var(--tauri-plugin-decoration-right-clearance,0px))] transition-opacity duration-150 ${
-          revealed ? 'pointer-events-auto opacity-100' : 'pointer-events-none opacity-0'
+        className={`relative flex h-full items-center justify-between border-b border-line bg-surface pl-2 pr-[max(8px,var(--tauri-plugin-decoration-right-clearance,0px))] transition-opacity ${
+          revealed ? 'pointer-events-auto opacity-100 duration-150' : 'pointer-events-none opacity-0 duration-100'
         }`}
       >
         <div

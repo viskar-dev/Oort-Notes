@@ -373,6 +373,10 @@ textarea:focus-visible,
 [data-tauri-plugin-decoration-root] {
   transition: opacity 150ms ease;
 }
+body.canvas-chrome-hidden
+  [data-tauri-plugin-decoration-root] {
+  transition-duration: 100ms;
+}
 body.canvas-chrome-hidden [data-tauri-plugin-decoration-root],
 body.canvas-chrome-hidden
   [data-tauri-plugin-decoration-root]
