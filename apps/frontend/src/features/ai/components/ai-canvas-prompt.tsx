@@ -45,7 +45,7 @@ function AiCanvasPromptCard({
   onClose: () => void;
   at: { x: number; y: number };
 }) {
-  const world = useAiCanvasPromptStore((s) => s.world);
+  const page = useAiCanvasPromptStore((s) => s.page);
   const selection = useAiCanvasPromptStore((s) => s.selection);
   const [input, setInput] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -75,7 +75,7 @@ function AiCanvasPromptCard({
     };
   }, [onClose]);
 
-  if (!world) return null;
+  if (!page) return null;
 
   const submit = () => {
     const text = input.trim();
@@ -88,7 +88,7 @@ function AiCanvasPromptCard({
     // system context. New shapes go exactly under the right-click point;
     // selected shapes arrive as real outlines so "tidy this up" works.
     const contextParts = [
-      `The user anchored this request by right-clicking the canvas at world position (${world.x}, ${world.y}). Place the shapes the request creates with explicit x/y there (treat it as the top-left of the new content, exactly as the create tools take coordinates). Do not refocus the camera.`,
+      `The user anchored this request by right-clicking the canvas. The click landed at canvas position (${page.x}, ${page.y}) — place the shapes the request creates with explicit x/y exactly there (treat it as the top-left of the new content, in the same coordinate space the create tools take). Do not refocus the camera.`,
     ];
     if (selection.length > 0) {
       const editor = getEditor();

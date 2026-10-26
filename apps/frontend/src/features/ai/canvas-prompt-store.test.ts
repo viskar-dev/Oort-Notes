@@ -2,19 +2,13 @@ import { afterEach, describe, expect, it } from 'vitest';
 import type { Editor, TLShapeId } from 'tldraw';
 import { useAiCanvasPromptStore } from './canvas-prompt-store';
 
-/** Minimal editor: world = screen / 2 (so the conversion is verifiable),
- *  plus a fixed container rect and a canned selection. */
-function fakeEditor(overrides?: {
-  rect?: { left: number; top: number };
-  selection?: TLShapeId[];
-}) {
-  const rect = overrides?.rect ?? { left: 100, top: 50 };
+/** Minimal editor: screenToPage halves the client coords (so the conversion
+ *  is verifiable) and reports a canned selection. tldraw's screen space is
+ *  the browser viewport, so capture must pass client coords through. */
+function fakeEditor(overrides?: { selection?: TLShapeId[] }) {
   const selection = overrides?.selection ?? [];
   return {
-    getContainer: () => ({
-      getBoundingClientRect: () => ({ ...rect, width: 800, height: 600 }),
-    }),
-    screenToWorld: ({ x, y }: { x: number; y: number }) => ({ x: x / 2, y: y / 2 }),
+    screenToPage: ({ x, y }: { x: number; y: number }) => ({ x: x / 2, y: y / 2 }),
     getSelectedShapeIds: () => selection,
   } as unknown as Editor;
 }
@@ -24,17 +18,16 @@ describe('canvas prompt capture', () => {
     useAiCanvasPromptStore.getState().close();
   });
 
-  it('capture stores client coords, snapped world coords and the selection', () => {
+  it('capture stores client coords, snapped page coords and the selection', () => {
     const editor = fakeEditor({
-      // client (260, 261.256) → container-relative (160, 211.256)
-      // → world (80, 105.628), which snaps to 2dp
+      // client (260, 211.256) → page (130, 105.628), which snaps to 2dp
       selection: ['shape:A' as TLShapeId, 'shape:B' as TLShapeId],
     });
-    useAiCanvasPromptStore.getState().capture(editor, 260, 261.256);
+    useAiCanvasPromptStore.getState().capture(editor, 260, 211.256);
 
     const s = useAiCanvasPromptStore.getState();
-    expect(s.at).toEqual({ x: 260, y: 261.256 });
-    expect(s.world).toEqual({ x: 80, y: 105.63 });
+    expect(s.at).toEqual({ x: 260, y: 211.256 });
+    expect(s.page).toEqual({ x: 130, y: 105.63 });
     expect(s.selection).toEqual(['shape:A', 'shape:B']);
     // Capture alone doesn't open the card.
     expect(s.open).toBe(false);
@@ -48,15 +41,30 @@ describe('canvas prompt capture', () => {
     expect(useAiCanvasPromptStore.getState().open).toBe(true);
   });
 
-  it('a capture without a container resets the geometry so openPrompt refuses', () => {
-    // No getContainer (canvas not mounted yet).
-    const broken = {} as unknown as Editor;
-    useAiCanvasPromptStore.getState().capture(broken, 12, 34);
+  it('a capture against an editor without screenToPage resets the geometry', () => {
+    // The live bug this guards: tldraw forks without screenToWorld — capture
+    // must degrade to "no capture", never throw.
+    const broken = { getSelectedShapeIds: () => [] } as unknown as Editor;
+    expect(() =>
+      useAiCanvasPromptStore.getState().capture(broken, 12, 34),
+    ).not.toThrow();
     expect(useAiCanvasPromptStore.getState().openPrompt()).toBe(false);
 
     // A later good capture re-arms the prompt.
     useAiCanvasPromptStore.getState().capture(fakeEditor(), 12, 34);
     expect(useAiCanvasPromptStore.getState().openPrompt()).toBe(true);
+  });
+
+  it('a throwing editor never escapes the capture', () => {
+    const throwing = {
+      screenToPage: () => {
+        throw new Error('camera exploded');
+      },
+    } as unknown as Editor;
+    expect(() =>
+      useAiCanvasPromptStore.getState().capture(throwing, 5, 6),
+    ).not.toThrow();
+    expect(useAiCanvasPromptStore.getState().openPrompt()).toBe(false);
   });
 
   it('close clears the geometry and selection', () => {
@@ -71,7 +79,7 @@ describe('canvas prompt capture', () => {
     const s = useAiCanvasPromptStore.getState();
     expect(s.open).toBe(false);
     expect(s.at).toBeNull();
-    expect(s.world).toBeNull();
+    expect(s.page).toBeNull();
     expect(s.selection).toEqual([]);
   });
 });
