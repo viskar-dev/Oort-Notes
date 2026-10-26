@@ -2,10 +2,12 @@ import { ChevronLeft, ChevronRight, Plus, Settings, Sparkles } from 'lucide-reac
 import { useEffect, useState, type RefObject } from 'react';
 import { isTauri } from '@tauri-apps/api/core';
 
-/** Height of the hover band that reveals the canvas chrome. Matches the
- *  app navbar (h-14) so the native caption buttons (window controls) align
- *  inside the same band on every screen. */
-const CHROME_BAND_PX = 56;
+/** Height of the hover band that reveals the canvas chrome (h-12). Slightly
+ *  slimmer than the app navbar band (h-14/56px, the plugin's :root
+ *  default): the canvas bar re-tunes the plugin's
+ *  --tauri-plugin-decoration-titlebar-height at runtime so the native
+ *  caption buttons align with this band (and restore 56px on other pages). */
+const CHROME_BAND_PX = 48;
 /** Pointer must travel this far below the band before the chrome may hide —
  *  stops the in/out thrash when grazing the band edge (so no hide delay is
  *  needed: leaving the margin hides instantly). */
@@ -76,11 +78,21 @@ export function CanvasTopBar({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /* drive the plugin's caption buttons with the same fade (see index.css) */
+  /* drive the plugin's caption buttons with the same fade (see index.css)
+     and re-tune the caption strip's height for this page's slimmer band */
   useEffect(() => {
     if (!isTauri()) return;
     document.body.classList.toggle('canvas-chrome-hidden', !revealed);
   }, [revealed]);
+
+  useEffect(() => {
+    if (!isTauri()) return;
+    const rootStyle = document.documentElement.style;
+    rootStyle.setProperty('--tauri-plugin-decoration-titlebar-height', '48px');
+    return () => {
+      rootStyle.removeProperty('--tauri-plugin-decoration-titlebar-height');
+    };
+  }, []);
 
   /* Both chapters are overlays on the full-size canvas: an invisible
      always-active strip keeps window dragging while the chrome is hidden,
@@ -89,7 +101,7 @@ export function CanvasTopBar({
   if (!strip) {
     return (
       <div
-        className="pointer-events-none absolute inset-x-0 top-0 z-40 h-14"
+        className="pointer-events-none absolute inset-x-0 top-0 z-40 h-12"
         onFocusCapture={reveal}
       >
         <div data-tauri-drag-region className="pointer-events-auto absolute inset-0" />
@@ -131,7 +143,7 @@ export function CanvasTopBar({
   }
   return (
     <div
-      className="pointer-events-none absolute inset-x-0 top-0 z-40 h-14"
+      className="pointer-events-none absolute inset-x-0 top-0 z-40 h-12"
       onFocusCapture={reveal}
     >
       <div data-tauri-drag-region className="pointer-events-auto absolute inset-0" />
