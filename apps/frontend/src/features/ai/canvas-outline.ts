@@ -30,9 +30,18 @@ export interface ShapeOutline {
   icon?: string;
   /** Present when the shape is nested in a container/group. */
   parentId?: string;
+  /** Pages mode only: which page sheet (stack position) the shape sits on. */
+  sheet_index?: number;
   /** For arrows: the bound shapes. */
   from?: string;
   to?: string;
+}
+
+/** Pages-mode geometry the outline enriches with sheet membership. */
+export interface OutlinePagesContext {
+  height: number;
+  gap: number;
+  count: number;
 }
 
 const round2 = (value: number) => Math.round(value * 100) / 100;
@@ -158,13 +167,27 @@ export function outlineShape(editor: Editor, shape: TLShape): ShapeOutline {
   return outline;
 }
 
-/** Outline a batch, skipping ids that no longer resolve (concurrent edits). */
-export function outlineShapes(editor: Editor, ids: Iterable<TLShapeId>): ShapeOutline[] {
+/** Outline a batch, skipping ids that no longer resolve (concurrent edits).
+ *  With pages-mode geometry, each outline reports the sheet it sits on —
+ *  the model composes per page instead of guessing from coordinates. */
+export function outlineShapes(
+  editor: Editor,
+  ids: Iterable<TLShapeId>,
+  pages?: OutlinePagesContext,
+): ShapeOutline[] {
+  const pitch = pages ? pages.height + pages.gap : 0;
   const out: ShapeOutline[] = [];
   for (const id of ids) {
     const shape = editor.getShape(id);
     if (!shape) continue;
-    out.push(outlineShape(editor, shape));
+    const outline = outlineShape(editor, shape);
+    if (pages) {
+      outline.sheet_index = Math.min(
+        Math.max(Math.floor(shape.y / pitch), 0),
+        Math.max(pages.count - 1, 0),
+      );
+    }
+    out.push(outline);
   }
   return out;
 }

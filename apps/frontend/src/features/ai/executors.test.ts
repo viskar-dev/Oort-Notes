@@ -116,6 +116,47 @@ describe('executeAiTool routing', () => {
     ).rejects.toThrow('unique');
   });
 
+  it('get_canvas outlines report sheet membership in pages mode', async () => {
+    // Two shapes on sheet 0 and 1 of a 3-sheet 800×1100 stack; one more on
+    // sheet 2 beyond the last, and one above y=0 — all must clamp.
+    const editor = {
+      ...makeEditor(),
+      getCurrentPageShapeIds: vi.fn(() => new Set(['shape:a', 'shape:b', 'shape:c', 'shape:d'])),
+      getShape: vi.fn((id: string) => {
+        const ys: Record<string, number> = {
+          'shape:a': 10,
+          'shape:b': 1100 + 40 + 300,
+          'shape:c': 2 * (1100 + 40) + 500,
+          'shape:d': -500,
+        };
+        return { id, type: 'text', x: 100, y: ys[id], parentId: 'page:1', props: {} };
+      }),
+      getShapeGeometry: vi.fn(() => ({ bounds: { w: 100, h: 50 } })),
+    } as unknown as AiExecutorDeps['editor'];
+    const ctx = () => ({
+      canvas_type: 'page' as const,
+      page: { width: 800, height: 1100, gap: 40, count: 3 },
+    });
+
+    const value = await executeAiTool({ ...deps(), editor, context: ctx }, 'get_canvas', {});
+    const shapes = value.shapes as Array<{ id: string; sheet_index?: number }>;
+    expect(shapes.find((s) => s.id === 'shape:a')!.sheet_index).toBe(0);
+    expect(shapes.find((s) => s.id === 'shape:b')!.sheet_index).toBe(1);
+    expect(shapes.find((s) => s.id === 'shape:c')!.sheet_index).toBe(2);
+    expect(shapes.find((s) => s.id === 'shape:d')!.sheet_index).toBe(0);
+  });
+
+  it('get_canvas leaves sheet membership off infinite canvases', async () => {
+    const editor = {
+      ...makeEditor(),
+      getCurrentPageShapeIds: vi.fn(() => new Set(['shape:a'])),
+      getShape: vi.fn(() => ({ id: 'shape:a', type: 'text', x: 100, y: 1140, parentId: 'page:1', props: {} })),
+      getShapeGeometry: vi.fn(() => ({ bounds: { w: 100, h: 50 } })),
+    } as unknown as AiExecutorDeps['editor'];
+    const value = await executeAiTool({ ...deps(), editor }, 'get_canvas', {});
+    expect((value.shapes as Array<Record<string, unknown>>)[0].sheet_index).toBeUndefined();
+  });
+
   it('update_shapes requires real shape ids', async () => {
     await expect(
       executeAiTool(deps(), 'update_shapes', { updates: [{ id: 'page:1' }] }),

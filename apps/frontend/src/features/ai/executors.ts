@@ -122,8 +122,11 @@ export async function executeAiTool(
 /** get_canvas: outlines plus the pages-mode geometry the layout rules need. */
 function getCanvas(deps: AiExecutorDeps): ToolValue {
   const editor = deps.editor;
+  const ctx = deps.context();
   const ids = [...editor.getCurrentPageShapeIds()];
-  return { shapes: outlineShapes(editor, ids), canvas: { ...deps.context() } };
+  // Pages mode: every outline reports the sheet it sits on.
+  const pages = ctx.canvas_type === 'page' && ctx.page ? ctx.page : undefined;
+  return { shapes: outlineShapes(editor, ids, pages), canvas: { ...ctx } };
 }
 
 /** Blob → raw base64 (no data: prefix; mime is reported separately). */

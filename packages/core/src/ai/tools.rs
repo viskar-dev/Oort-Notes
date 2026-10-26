@@ -71,7 +71,7 @@ pub fn all_tools() -> Vec<ToolDef> {
     vec![
         def!(
             "get_canvas",
-            "Read the currently open canvas as a compact outline: every shape's id, type, text content, position and size. Code blocks include their language and code, math blocks their LaTeX, tables their markdown, cards their variant and text. Also reports pages-mode geometry (page size and sheet count). Call this before any edit so you work with real shape ids and real positions.",
+            "Read the currently open canvas as a compact outline: every shape's id, type, text content, position and size. Code blocks include their language and code, math blocks their LaTeX, tables their markdown, cards their variant and text. Also reports pages-mode geometry (page size and sheet count), and in pages mode each shape's sheet_index — the page it sits on. Call this before any edit so you work with real shape ids and real positions.",
             a::GetCanvasArgs, false, false, frontend
         ),
         def!(
