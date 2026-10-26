@@ -151,6 +151,16 @@ pub fn all_tools() -> Vec<ToolDef> {
         ),
         // Rust side
         def!(
+            "create_notebook",
+            "Create a new, empty notebook (a folder for canvases). Returns its id — pass it to create_chapter. Do not create one when the user means an existing notebook; use list_canvases first.",
+            a::CreateNotebookArgs, false, false, rust
+        ),
+        def!(
+            "create_chapter",
+            "Create a new canvas (chapter) inside a notebook. canvas_type: 'infinite' free whiteboard (default), 'page' stacked fixed sheets (set page_width/page_height to override the 800×1100 default), 'scroll' one long column. Returns the created canvas's id. It does not open the canvas — the user keeps their current one.",
+            a::CreateChapterArgs, false, false, rust
+        ),
+        def!(
             "list_canvases",
             "List the user's canvases (chapters) across notebooks: id, name, notebook id and name, canvas type and last edit time; page-type chapters also report their topic count and total page count. Use it to find which canvas the user is talking about. Results are newest-edit first; use offset and limit (default 50, at most 200) to page through instead of assuming one page holds everything.",
             a::ListCanvasesArgs, false, false, rust

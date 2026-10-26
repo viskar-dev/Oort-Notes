@@ -246,6 +246,32 @@ pub struct FocusViewportArgs {
 #[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
 pub struct SnapshotArgs {}
 
+/// Create a new, empty notebook.
+#[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
+pub struct CreateNotebookArgs {
+    /// The notebook's name (unique among notebooks).
+    pub name: String,
+    /// Optional one-line description.
+    pub description: Option<String>,
+}
+
+/// Create a new canvas (chapter) inside an existing notebook.
+#[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
+pub struct CreateChapterArgs {
+    /// The notebook to create the canvas in (from list_canvases or
+    /// create_notebook).
+    pub notebook_id: String,
+    /// The canvas's name (unique among chapters in the notebook).
+    pub name: String,
+    /// 'infinite' (free whiteboard, default), 'page' (stacked fixed sheets) or
+    /// 'scroll' (one long column).
+    pub canvas_type: Option<String>,
+    /// Pages mode only: custom page width in px (default 800).
+    pub page_width: Option<i64>,
+    /// Pages mode only: custom page height in px (default 1100).
+    pub page_height: Option<i64>,
+}
+
 /// List canvases (chapters) across all notebooks.
 #[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
 pub struct ListCanvasesArgs {

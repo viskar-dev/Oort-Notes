@@ -200,6 +200,81 @@ async fn expect_err(ctx: &DispatchCtx<'_>, name: &str, args: Value) -> String {
 }
 
 #[tokio::test]
+async fn create_notebook_and_chapter_build_structure() {
+    let (pool, _, _) = seed().await;
+    let ctx = DispatchCtx { pool: &pool, bridge: None, origin: CallOrigin::Assistant };
+
+    let note = dispatch(&ctx, "create_notebook", json!({ "name": "  Chemistry  ", "description": "experiments" }))
+        .await
+        .unwrap();
+    assert_eq!(note["name"], "Chemistry", "name is trimmed");
+    let notebook_id = note["id"].as_str().unwrap().to_string();
+
+    // A canvastype default and a page canvas with explicit size.
+    let canvas = dispatch(
+        &ctx,
+        "create_chapter",
+        json!({ "notebook_id": notebook_id, "name": "Bonds" }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(canvas["canvas_type"], "infinite", "defaults to infinite");
+    assert_eq!(canvas["created"], true);
+
+    let paged = dispatch(
+        &ctx,
+        "create_chapter",
+        json!({
+            "notebook_id": notebook_id,
+            "name": "Reactions",
+            "canvas_type": "page",
+            "page_width": 900,
+            "page_height": 1200,
+        }),
+    )
+    .await
+    .unwrap();
+    let chapter = repo::load_chapter(&pool, paged["id"].as_str().unwrap()).await.unwrap();
+    assert_eq!(chapter.canvas_type, "page");
+
+    // list_canvases sees both canvases under the new notebook's name.
+    let value = dispatch(&ctx, "list_canvases", json!({ "query": "chemistry" }))
+        .await
+        .unwrap();
+    assert_eq!(value["canvases"].as_array().unwrap().len(), 2);
+
+    // Errors: empty name, bad canvas type, bad page size, missing notebook.
+    let e = dispatch(&ctx, "create_notebook", json!({ "name": "  " }))
+        .await
+        .unwrap_err();
+    assert!(e.to_string().contains("must not be empty"));
+    let e = dispatch(
+        &ctx,
+        "create_chapter",
+        json!({ "notebook_id": notebook_id, "name": "X", "canvas_type": "mindmap" }),
+    )
+    .await
+    .unwrap_err();
+    assert!(e.to_string().contains("canvas_type"), "got: {e}");
+    let e = dispatch(
+        &ctx,
+        "create_chapter",
+        json!({ "notebook_id": notebook_id, "name": "X", "page_width": -5 }),
+    )
+    .await
+    .unwrap_err();
+    assert!(e.to_string().contains("page_width"));
+    let e = dispatch(
+        &ctx,
+        "create_chapter",
+        json!({ "notebook_id": "nosuch", "name": "X" }),
+    )
+    .await
+    .unwrap_err();
+    assert!(e.to_string().contains("not found"), "got: {e}");
+}
+
+#[tokio::test]
 async fn frontend_tools_route_to_open_canvas() {
     let (pool, _, chapter) = seed().await;
     config::set_active_canvas(&pool, Some(&chapter.id))

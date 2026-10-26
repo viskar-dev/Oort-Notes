@@ -98,6 +98,8 @@ fn validate_args(name: &str, args: Value) -> Result<(), CoreError> {
         "update_shapes" => serde_json::from_value::<a::UpdateShapesArgs>(args).map(|_| ()),
         "delete_shapes" => serde_json::from_value::<a::DeleteShapesArgs>(args).map(|_| ()),
         "focus_viewport" => serde_json::from_value::<a::FocusViewportArgs>(args).map(|_| ()),
+        "create_notebook" => serde_json::from_value::<a::CreateNotebookArgs>(args).map(|_| ()),
+        "create_chapter" => serde_json::from_value::<a::CreateChapterArgs>(args).map(|_| ()),
         "list_canvases" => serde_json::from_value::<a::ListCanvasesArgs>(args).map(|_| ()),
         "get_active_canvas" => serde_json::from_value::<a::GetActiveCanvasArgs>(args).map(|_| ()),
         "save_canvas" => serde_json::from_value::<a::SaveCanvasArgs>(args).map(|_| ()),
@@ -140,6 +142,79 @@ async fn rust_tool(ctx: &DispatchCtx<'_>, name: &str, args: Value) -> Result<Val
                 })),
                 None => Ok(serde_json::json!({ "active": false })),
             }
+        }
+
+        "create_notebook" => {
+            let args: params::CreateNotebookArgs = tools::parse_args(name, args)?;
+            let name = args.name.trim();
+            if name.is_empty() {
+                return Err(CoreError::Ai("notebook name must not be empty".into()));
+            }
+            let notebook = repo::create_notebook(
+                ctx.pool,
+                &repo::new_id(),
+                name,
+                None,
+                args.description.as_deref().map(str::trim).filter(|d| !d.is_empty()),
+                None,
+            )
+            .await?;
+            Ok(serde_json::json!({
+                "id": notebook.id,
+                "name": notebook.name,
+                "description": notebook.description,
+                "created": true,
+            }))
+        }
+
+        "create_chapter" => {
+            let args: params::CreateChapterArgs = tools::parse_args(name, args)?;
+            let name = args.name.trim();
+            if name.is_empty() {
+                return Err(CoreError::Ai("canvas name must not be empty".into()));
+            }
+            let canvas_type = args
+                .canvas_type
+                .as_deref()
+                .map(str::trim)
+                .filter(|t| !t.is_empty())
+                .unwrap_or("infinite");
+            for (field, v) in [
+                ("page_width", args.page_width),
+                ("page_height", args.page_height),
+            ] {
+                if let Some(v) = v {
+                    if v <= 0 || v > 20000 {
+                        return Err(CoreError::Ai(format!(
+                            "{field} must be between 1 and 20000 (pixels)"
+                        )));
+                    }
+                }
+            }
+            // A missing notebook is a clean, readable model error — not a
+            // foreign-key leak.
+            repo::load_notebook(ctx.pool, &args.notebook_id).await?;
+            let chapter = repo::create_chapter(
+                ctx.pool,
+                &repo::new_id(),
+                &args.notebook_id,
+                name,
+                canvas_type,
+                None,
+                args.page_width,
+                args.page_height,
+                None,
+                None,
+                None,
+            )
+            .await?;
+            Ok(serde_json::json!({
+                "id": chapter.id,
+                "name": chapter.name,
+                "notebook_id": chapter.notebook_id,
+                "canvas_type": chapter.canvas_type,
+                "created": true,
+            }))
         }
 
         "list_canvases" => {
