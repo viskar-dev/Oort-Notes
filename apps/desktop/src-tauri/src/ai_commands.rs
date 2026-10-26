@@ -49,9 +49,14 @@ pub async fn get_ai_config(pool: State<'_, SqlitePool>) -> R<ai::AiConfig> {
 pub async fn set_ai_config(
     base_url: String,
     model: String,
+    destructive_policy: String,
     pool: State<'_, SqlitePool>,
 ) -> R<()> {
-    let config = ai::AiConfig { base_url, model };
+    let config = ai::AiConfig {
+        base_url,
+        model,
+        destructive_policy,
+    };
     ai::config::save_config(&pool, &config).await.map_err(map)
 }
 

@@ -106,12 +106,20 @@ export function aiListToolNames(): Promise<string[]> {
   return invoke<string[]>('list_tool_names');
 }
 
-export function aiGetConfig(): Promise<{ base_url: string; model: string }> {
-  return invoke<{ base_url: string; model: string }>('get_ai_config');
+export function aiGetConfig(): Promise<{
+  base_url: string;
+  model: string;
+  destructive_policy: string;
+}> {
+  return invoke<{ base_url: string; model: string; destructive_policy: string }>('get_ai_config');
 }
 
-export function aiSetConfig(baseUrl: string, model: string): Promise<void> {
-  return invoke<void>('set_ai_config', { baseUrl, model });
+export function aiSetConfig(
+  baseUrl: string,
+  model: string,
+  destructivePolicy: string,
+): Promise<void> {
+  return invoke<void>('set_ai_config', { baseUrl, model, destructivePolicy });
 }
 
 export function aiHasKey(): Promise<boolean> {

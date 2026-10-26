@@ -601,12 +601,14 @@ async fn config_roundtrip_with_defaults_and_overrides() {
     let config = config::load_config(&pool).await.unwrap();
     assert_eq!(config.base_url, "https://api.openai.com/v1");
     assert_eq!(config.model, "gpt-4o-mini");
+    assert_eq!(config.destructive_policy, config::POLICY_ASK);
 
     config::save_config(
         &pool,
         &config::AiConfig {
             base_url: "https://api.openai.com/v1".to_string(),
             model: "gpt-4o-mini".to_string(),
+            destructive_policy: config::POLICY_ASK.to_string(),
         },
     )
     .await
@@ -617,6 +619,7 @@ async fn config_roundtrip_with_defaults_and_overrides() {
         &config::AiConfig {
             base_url: "https://openrouter.ai/api/v1".to_string(),
             model: "anthropic/claude-sonnet-4".to_string(),
+            destructive_policy: config::POLICY_AUTO_CONFIRM.to_string(),
         },
     )
     .await
@@ -624,6 +627,22 @@ async fn config_roundtrip_with_defaults_and_overrides() {
     let loaded = config::load_config(&pool).await.unwrap();
     assert_eq!(loaded.base_url, "https://openrouter.ai/api/v1");
     assert_eq!(loaded.model, "anthropic/claude-sonnet-4");
+    assert_eq!(loaded.destructive_policy, config::POLICY_AUTO_CONFIRM);
+
+    // Junk is refused at save time: a typo must not strand callers later.
+    let junk = config::save_config(
+        &pool,
+        &config::AiConfig {
+            base_url: "https://openrouter.ai/api/v1".to_string(),
+            model: "anthropic/claude-sonnet-4".to_string(),
+            destructive_policy: "nuke".to_string(),
+        },
+    )
+    .await;
+    assert!(junk.is_err());
+    // And the last good row is what still loads.
+    let loaded = config::load_config(&pool).await.unwrap();
+    assert_eq!(loaded.destructive_policy, config::POLICY_AUTO_CONFIRM);
 }
 
 // ---------------------------------------------------------------------

@@ -20,6 +20,7 @@ import {
   aiSetKey,
   type AiConnectionInfo,
 } from '@/features/ai/ai-ipc';
+import { type AiDestructivePolicy, useAiPolicyStore } from '@/features/ai/policy-store';
 
 /* shared input/button classes for the flat settings look:
    inputs are the only bordered elements on the page */
@@ -36,7 +37,11 @@ const GHOST_BTN_CLS =
  *  - the MCP URL (endpoint + token) is shown and copyable; token rotation is
  *    behind the ⋯ menu. The endpoint persists across app restarts. */
 export function AiSettingsPage() {
-  const [config, setConfig] = useState<{ base_url: string; model: string } | null>(null);
+  const [config, setConfig] = useState<{
+    base_url: string;
+    model: string;
+    destructive_policy: string;
+  } | null>(null);
   const [hasKey, setHasKey] = useState(false);
   const [keyDraft, setKeyDraft] = useState('');
   const [mcp, setMcp] = useState<AiConnectionInfo | null>(null);
@@ -67,9 +72,11 @@ export function AiSettingsPage() {
       try {
         const [cfg, keyHit, mcpInfo] = await Promise.all([aiGetConfig(), aiHasKey(), aiMcpInfo()]);
         if (cancelled) return;
-        setConfig(cfg);
+        setConfig({ ...cfg, destructive_policy: normPolicy(cfg.destructive_policy) });
         setHasKey(keyHit);
         setMcp(mcpInfo);
+        // Keep the live executors in sync with the stored policy.
+        useAiPolicyStore.getState().set(normPolicy(cfg.destructive_policy));
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : String(e));
       }
@@ -86,8 +93,12 @@ export function AiSettingsPage() {
 
   async function saveConfig() {
     if (!config) return;
+    const policy = normPolicy(config.destructive_policy);
     try {
-      await aiSetConfig(config.base_url.trim(), config.model.trim());
+      await aiSetConfig(config.base_url.trim(), config.model.trim(), policy);
+      // No remount happens after a save; the live store carries it into the
+      // running canvas executors immediately.
+      useAiPolicyStore.getState().set(policy);
       flash('Saved');
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -191,6 +202,28 @@ export function AiSettingsPage() {
                       />
                     </label>
                   </div>
+                  <div className="mt-4 grid grid-cols-2 gap-3">
+                    <label className="flex flex-col gap-1.5">
+                      <span className="text-xs text-muted-foreground">
+                        Destructive tools (MCP clients)
+                      </span>
+                      <select
+                        value={config.destructive_policy}
+                        onChange={(e) =>
+                          setConfig({ ...config, destructive_policy: e.target.value })
+                        }
+                        className={INPUT_CLS}
+                      >
+                        <option value="ask" className="bg-[#111016]">
+                          Ask in the client each time
+                        </option>
+                        <option value="auto_confirm" className="bg-[#111016]">
+                          Delete right away
+                        </option>
+                      </select>
+                    </label>
+                    <div />
+                  </div>
                   {/* no “Test connection”: the current UI has no such control
                       and inventing a stub is out of scope */}
                   <div className="mt-4 flex items-center gap-2">
@@ -200,6 +233,10 @@ export function AiSettingsPage() {
                     >
                       Save
                     </button>
+                    <span className="text-xs text-muted-foreground">
+                      Applies to external MCP clients. The in-app assistant
+                      always confirms before deleting.
+                    </span>
                   </div>
                 </>
               )}

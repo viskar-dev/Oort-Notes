@@ -17,6 +17,21 @@ pub const SETTING_AI_CONFIG: &str = "ai_config";
 /// `settings` row holding the id of the canvas the AI currently works on.
 pub const SETTING_ACTIVE_CANVAS: &str = "ai_active_canvas";
 
+/// Policy value: destructive tool calls from MCP clients must confirm inside
+/// the client's own conversation (structured `requires_confirmation` result).
+pub const POLICY_ASK: &str = "ask";
+/// Policy value: destructive tool calls from MCP clients run right away.
+pub const POLICY_AUTO_CONFIRM: &str = "auto_confirm";
+
+/// Legacy `ai_config` rows (written before the policy existed) deserialize
+/// with this fallback rather than `String::default()` = "".
+fn default_policy() -> String {
+    POLICY_ASK.to_string()
+}
+
+/// The valid destructive-policy values, for save-time validation.
+const POLICIES: [&str; 2] = [POLICY_ASK, POLICY_AUTO_CONFIRM];
+
 /// Where the user's model provider answers. OpenAI-compatible: the base URL
 /// switches providers (api.openai.com, OpenRouter, LM Studio, Ollama…)
 /// without code changes.
@@ -26,6 +41,13 @@ pub struct AiConfig {
     pub base_url: String,
     /// Model id requested on every call, e.g. `gpt-4o-mini`.
     pub model: String,
+    /// How destructive tool calls (`delete_shapes`) behave for MCP callers
+    /// ("ask" → structured `requires_confirmation` result, "auto_confirm" →
+    /// run immediately). The in-app assistant always confirms through the
+    /// app's own card regardless of this value. Defaults to "ask"; stored
+    /// configs written before this field existed load as "ask".
+    #[serde(default = "default_policy")]
+    pub destructive_policy: String,
 }
 
 impl Default for AiConfig {
@@ -33,7 +55,21 @@ impl Default for AiConfig {
         Self {
             base_url: "https://api.openai.com/v1".to_string(),
             model: "gpt-4o-mini".to_string(),
+            destructive_policy: POLICY_ASK.to_string(),
         }
+    }
+}
+
+/// Validate a user-supplied (or stored) policy value. Unknown values fail:
+/// saving junk would silently strand the caller's confirmations.
+fn validate_policy(value: &str) -> Result<&str, CoreError> {
+    let trimmed = value.trim();
+    if POLICIES.contains(&trimmed) {
+        Ok(trimmed)
+    } else {
+        Err(CoreError::Ai(format!(
+            "unknown destructive policy {trimmed:?} — expected one of {POLICIES:?}"
+        )))
     }
 }
 
@@ -63,6 +99,14 @@ pub async fn load_config(pool: &SqlitePool) -> Result<AiConfig, CoreError> {
             let mut parsed: AiConfig = serde_json::from_str(&json)
                 .map_err(|e| CoreError::Ai(format!("stored ai config is invalid: {e}")))?;
             parsed.base_url = normalize_base_url(&parsed.base_url);
+            // Defensive: an old or hand-edited row must never hard-fail over
+            // the policy — unknown/empty falls back to the safe default.
+            parsed.destructive_policy =
+                if POLICIES.contains(&parsed.destructive_policy.as_str()) {
+                    parsed.destructive_policy
+                } else {
+                    POLICY_ASK.to_string()
+                };
             Ok(parsed)
         }
         None => Ok(AiConfig::default()),
@@ -70,11 +114,13 @@ pub async fn load_config(pool: &SqlitePool) -> Result<AiConfig, CoreError> {
 }
 
 /// Persist the AI config as one settings row (base URL normalized so a
-/// pasted full endpoint URL can't poison every later request).
+/// pasted full endpoint URL can't poison every later request; the policy is
+/// validated so saving junk can't strand callers later).
 pub async fn save_config(pool: &SqlitePool, config: &AiConfig) -> Result<(), CoreError> {
     let normalized = AiConfig {
         base_url: normalize_base_url(&config.base_url),
         model: config.model.trim().to_string(),
+        destructive_policy: validate_policy(&config.destructive_policy)?.to_string(),
     };
     let json = serde_json::to_string(&normalized)
         .map_err(|e| CoreError::Ai(format!("cannot serialize ai config: {e}")))?;
@@ -228,6 +274,39 @@ mod tests {
         let parsed: McpConfig = serde_json::from_str(&json).expect("stored json must parse");
         assert_eq!(parsed.port, config.port);
         assert_eq!(parsed.token, config.token);
+    }
+
+    #[test]
+    fn validate_policy_accepts_only_known_values() {
+        assert_eq!(validate_policy(POLICY_ASK).expect("ask"), POLICY_ASK);
+        assert_eq!(
+            validate_policy(" auto_confirm ").expect("trimmed"),
+            POLICY_AUTO_CONFIRM
+        );
+        assert!(validate_policy("").is_err());
+        assert!(validate_policy("nuke").is_err());
+    }
+
+    #[test]
+    fn ai_config_with_policy_round_trips_through_json() {
+        let config = AiConfig {
+            base_url: "https://api.groq.com/openai/v1".into(),
+            model: "llama-3".into(),
+            destructive_policy: POLICY_AUTO_CONFIRM.into(),
+        };
+        let json = serde_json::to_string(&config).expect("AiConfig must serialize");
+        let parsed: AiConfig = serde_json::from_str(&json).expect("stored json must parse");
+        assert_eq!(parsed.destructive_policy, POLICY_AUTO_CONFIRM);
+    }
+
+    #[test]
+    fn old_ai_config_json_without_policy_loads_as_ask() {
+        // Rows written before the policy existed must keep loading.
+        let parsed: AiConfig = serde_json::from_str(
+            r#"{"base_url":"https://api.openai.com/v1","model":"gpt-4o-mini"}"#,
+        )
+        .expect("legacy json must parse");
+        assert_eq!(parsed.destructive_policy, POLICY_ASK);
     }
 
     #[test]

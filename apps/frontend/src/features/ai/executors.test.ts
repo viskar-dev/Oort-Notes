@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { executeAiTool, type AiExecutorDeps } from './executors';
 import { useViewModeStore } from '@/stores/view-mode-store';
 import { useAiConfirmStore } from './confirm-store';
+import { useAiPolicyStore } from './policy-store';
 
 /** executors only needs the handful of editor methods its filters touch. */
 function makeEditor(): AiExecutorDeps['editor'] {
@@ -20,6 +21,7 @@ function deps(): AiExecutorDeps {
     confirm: async () => true,
     readOnly: () => useViewModeStore.getState().on,
     origin: 'assistant',
+    destructivePolicy: () => useAiPolicyStore.getState().policy,
   };
 }
 
@@ -252,6 +254,33 @@ describe('executeAiTool routing', () => {
     expect(done).toEqual({ deleted: ['shape:a'] });
     expect(editor.deleteShapes).toHaveBeenCalledTimes(1);
     expect(confirmSpy).not.toHaveBeenCalled();
+  }, 5000);
+
+  it('mcp delete runs immediately under the auto_confirm policy', async () => {
+    const confirmSpy = vi.fn();
+    useAiConfirmStore.setState({ requestConfirm: confirmSpy });
+    try {
+      useAiPolicyStore.setState({ policy: 'auto_confirm' });
+      const editor = {
+        ...makeEditor(),
+        getShape: vi.fn(() => ({ id: 'shape:a' })),
+        deleteShapes: vi.fn(),
+      } as unknown as AiExecutorDeps['editor'];
+
+      // The user opted MCP clients into trusted destructive calls: the
+      // requires_confirmation round-trip is skipped and the shapes go.
+      const done = await executeAiTool(
+        { ...deps(), editor, origin: 'mcp' },
+        'delete_shapes',
+        { ids: ['shape:a'] },
+      );
+      expect(done).toEqual({ deleted: ['shape:a'] });
+      expect(editor.deleteShapes).toHaveBeenCalledWith(['shape:a']);
+      expect(confirmSpy).not.toHaveBeenCalled();
+    } finally {
+      // Policy is a global store: never leak auto_confirm into other tests.
+      useAiPolicyStore.setState({ policy: 'ask' });
+    }
   }, 5000);
 
   // -----------------------------------------------------------------

@@ -22,6 +22,7 @@ import { parseMarkdownTable, createTableFromMarkdown } from '@/features/canvas/t
 import { outlineShapes, fullShapeState } from './canvas-outline';
 import { buildRichDocument } from './rich-text';
 import { confirmShapeDeletion } from './confirm-store';
+import type { AiDestructivePolicy } from './policy-store';
 import { layoutDiagram } from './diagram-layout';
 
 /** What the executors need to know about the chapter rendering context
@@ -85,6 +86,9 @@ export interface AiExecutorDeps {
    *  `confirm`; MCP-origin calls confirm inside the client's own
    *  conversation (`confirmed` arg) and must never trigger desktop UI. */
   origin: 'assistant' | 'mcp';
+  /** The stored destructive-policy setting — consulted for MCP callers
+   *  only ("auto_confirm" skips the requires_confirmation round-trip). */
+  destructivePolicy: () => AiDestructivePolicy;
   /** Pages-mode sheet stacks (page-type canvases); missing elsewhere. */
   pages?: () => AiPagesCapability | null;
 }
@@ -853,13 +857,20 @@ function deleteShapes(deps: AiExecutorDeps, args: ToolArgs): Promise<ToolValue> 
     throw new Error('none of the ids refer to a shape on the active page');
   }
 
-  // Destructive confirmation lives with the caller. MCP-origin calls resolve
-  // it inside the client's own conversation: an unconfirmed call comes back
-  // as a structured result the client's model can act on (re-send with
-  // "confirmed": true) — and no dialog ever pops up on the desktop. The
+  // Destructive confirmation lives with the caller, shaped by the
+  // destructive-policy setting. MCP-origin calls resolve it inside the
+  // client's own conversation: an unconfirmed call comes back as a
+  // structured result the client's model can act on (re-send with
+  // "confirmed": true) — and no dialog ever pops up on the desktop. With
+  // the "auto_confirm" policy (an explicit user choice in AI settings) the
+  // round-trip is skipped entirely and the call deletes immediately. The
   // assistant ignores a model-supplied `confirmed`; its confirmation is the
   // app's own card, so the model can never self-approve.
-  if (deps.origin === 'mcp' && args.confirmed !== true) {
+  if (
+    deps.origin === 'mcp' &&
+    args.confirmed !== true &&
+    deps.destructivePolicy() !== 'auto_confirm'
+  ) {
     return Promise.resolve({
       status: 'requires_confirmation',
       count: existing.length,

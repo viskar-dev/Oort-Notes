@@ -11,6 +11,7 @@ import {
 import { missingExecutors, handleCanvasCall, type BridgeIo } from './bridge';
 import { executeAiTool, type AiExecutorDeps, type AiPagesCapability } from './executors';
 import { useAiConfirmStore } from './confirm-store';
+import { useAiPolicyStore } from './policy-store';
 import { useViewModeStore } from '@/stores/view-mode-store';
 
 /**
@@ -45,7 +46,17 @@ export function useAiBridge(
     confirm: (title, detail) =>
       useAiConfirmStore.getState().requestConfirm(title, detail),
     readOnly: () => useViewModeStore.getState().on,
+    // Live read: the settings page flips this between "ask"/"auto_confirm"
+    // without a remount.
+    destructivePolicy: () => useAiPolicyStore.getState().policy,
   });
+
+  // Adopt the stored policy once per mount, so the executors agree with
+  // AI settings even if the settings page hasn't run in this webview.
+  useEffect(() => {
+    if (!isTauri()) return;
+    void useAiPolicyStore.getState().refresh();
+  }, []);
 
   useEffect(() => {
     if (!isTauri()) return;
