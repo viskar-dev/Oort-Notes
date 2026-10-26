@@ -45,7 +45,7 @@ export interface CanvasDeeplink {
  * the stack. ctrl+wheel / trackpad pinch passes through untouched (native
  * zoom).
  */
-function setupSmoothWheelPanning(editor: Editor): () => void {
+function setupSmoothWheelPanning(editor: Editor): { cleanup: () => void; cancel: () => void } {
   // capture on an ancestor: at the container element itself, listener order
   // is registration order and tldraw's would already have run
   const host = editor.getContainer().parentElement ?? editor.getContainer();
@@ -99,9 +99,15 @@ function setupSmoothWheelPanning(editor: Editor): () => void {
   };
 
   host.addEventListener('wheel', onWheel, { capture: true, passive: false });
-  return () => {
-    host.removeEventListener('wheel', onWheel, { capture: true } as EventListenerOptions);
-    stop();
+  return {
+    cleanup: () => {
+      host.removeEventListener('wheel', onWheel, { capture: true } as EventListenerOptions);
+      stop();
+    },
+    // drop the eased target without tearing the listener down — called by
+    // programmatic camera fits (pager / fit toggle / refit) so their flush
+    // position isn't dragged back by a still-running easing loop
+    cancel: stop,
   };
 }
 
@@ -152,8 +158,15 @@ export function useChapterCanvas(
     (x, y) => ({ x, y }),
   );
 
-  // smooth wheel panning teardown (page chapters)
+  // smooth wheel panning teardown + "drop the pending wheel anim" hook
   const smoothWheelCleanupRef = useRef<(() => void) | null>(null);
+  // programmatic camera fits (pager, fit toggle, refit) cancel any in-flight
+  // wheel easing first — otherwise it keeps steering the camera toward the
+  // stale scroll target and the fitted sheet ends up floating mid-viewport
+  const smoothWheelCancelRef = useRef<(() => void) | null>(null);
+  // camera → pager sync teardown (page chapters): free wheel-scrolling must
+  // keep the pager's active page following what's actually in view
+  const cameraSyncTeardownRef = useRef<(() => void) | null>(null);
 
   // page-mode state: the open topic's sheets (order = vertical position)
   const activePagesRef = useRef<TopicPage[]>([]);
@@ -313,6 +326,9 @@ export function useChapterCanvas(
       const pw = chapter.page_width;
       const ph = chapter.page_height;
       if (!pw || !ph) return;
+      // a fitted camera must stick: kill any in-flight wheel easing, or its
+      // eased target keeps steering and the sheet floats mid-viewport
+      smoothWheelCancelRef.current?.();
       const screen = editor.getViewportScreenBounds();
       const p = getPadding();
       const target =
@@ -630,7 +646,34 @@ export function useChapterCanvas(
       // pages: PDF-like smooth wheel scrolling (eased camera, no jumps)
       if (isPageChapter) {
         smoothWheelCleanupRef.current?.();
-        smoothWheelCleanupRef.current = setupSmoothWheelPanning(editor);
+        smoothWheelCancelRef.current?.();
+        const wheel = setupSmoothWheelPanning(editor);
+        smoothWheelCleanupRef.current = wheel.cleanup;
+        smoothWheelCancelRef.current = wheel.cancel;
+
+        // camera → pager sync: while the user free-scrolls the stack, the
+        // sheet covering the viewport's center becomes the active page —
+        // chip only, the camera itself is never touched
+        let syncTimer: ReturnType<typeof setTimeout> | undefined;
+        const syncFromCamera = () => {
+          const count = activePagesRef.current.length;
+          if (count === 0) return;
+          const cam = editor.getCamera();
+          const vp = editor.getViewportScreenBounds();
+          const centerY = editor.screenToPage({ x: vp.x + vp.w / 2, y: vp.y + vp.h / 2 }).y;
+          const stepY = (chapter.page_height ?? 0) + SHEET_GAP;
+          const idx = Math.min(Math.max(Math.round(centerY / stepY), 0), count - 1);
+          if (idx !== activePageIndexRef.current) {
+            activePageIndexRef.current = idx;
+            setActivePageIndex(idx);
+          }
+        };
+        cameraSyncTeardownRef.current = editor.store.listen((changes) => {
+          if (!Object.keys(changes.changes.updated ?? {}).some((k) => k.startsWith('camera:')))
+            return;
+          clearTimeout(syncTimer);
+          syncTimer = setTimeout(syncFromCamera, 120);
+        }, { scope: 'session' });
       }
 
       // text shapes compute their geometry live (measured from the rich
@@ -673,7 +716,11 @@ export function useChapterCanvas(
       unregisterSideEffectsRef.current.forEach((fn) => fn());
       unregisterSideEffectsRef.current = [];
       smoothWheelCleanupRef.current?.();
+      smoothWheelCancelRef.current?.();
       smoothWheelCleanupRef.current = null;
+      smoothWheelCancelRef.current = null;
+      cameraSyncTeardownRef.current?.();
+      cameraSyncTeardownRef.current = null;
       const editor = editorRef.current;
       if (editor) saveCanvas(editor);
     },
