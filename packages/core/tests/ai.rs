@@ -3,7 +3,7 @@
 
 use std::sync::Mutex;
 
-use note_core::ai::bridge::{events, Bridge, BoxFut};
+use note_core::ai::bridge::{Bridge, BoxFut};
 use note_core::ai::config;
 use note_core::ai::dispatch::{dispatch, DispatchCtx};
 use note_core::ai::tools;
@@ -94,7 +94,7 @@ async fn seed() -> (sqlx::SqlitePool, Notebook, Chapter) {
 
 #[test]
 fn registry_names_are_unique() {
-    let names = tools::all_tool_names();
+    let names: Vec<&str> = tools::all_tools().iter().map(|t| t.name).collect();
     let mut sorted = names.clone();
     sorted.sort_unstable();
     assert!(
@@ -117,11 +117,32 @@ fn internal_tools_never_reach_public_surfaces() {
     // The snapshot serializer is internal plumbing.
     let snapshot = tools::tool_def("get_snapshot").expect("get_snapshot registered");
     assert!(snapshot.internal);
-    assert!(
-        !tools::all_tool_names().contains(&"nosuchtool"),
-        "all_tool_names returned an unregistered name"
-    );
     assert!(tools::tool_def("nosuchtool").is_none());
+}
+
+/// The executor-coverage list must hold exactly the frontend-target tools:
+/// Rust-target ones are native dispatch handlers, and flagging them against
+/// the webview executor set was a false "the AI will fail those tools!" on
+/// every mount.
+#[test]
+fn executor_coverage_list_holds_exactly_the_frontend_tools() {
+    let coverage = tools::frontend_tool_names();
+    for def in tools::all_tools() {
+        let listed = coverage.contains(&def.name);
+        assert_eq!(
+            listed,
+            def.target == tools::Target::Frontend,
+            "{} (target {:?}) is {} the executor-coverage list",
+            def.name,
+            def.target,
+            if listed { "wrongly in" } else { "missing from" },
+        );
+    }
+    // Internal plumbing still counts as covered (save_canvas needs it).
+    assert!(coverage.contains(&"get_snapshot"));
+    assert!(!coverage.contains(&"list_canvases"));
+    assert!(!coverage.contains(&"get_active_canvas"));
+    assert!(!coverage.contains(&"save_canvas"));
 }
 
 #[test]

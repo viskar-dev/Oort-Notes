@@ -84,11 +84,13 @@ pub async fn clear_api_key() -> R<()> {
 // Tools
 // ---------------------------------------------------------------------
 
-/// All registry tool names, including internal plumbings — the frontend uses
-/// this at startup to prove its executors cover the registry.
+/// Tool names the webview executes (frontend target, internal plumbing
+/// included) — the frontend checks this at startup against its executor
+/// set. Rust-target tools are native dispatch handlers; listing them here
+/// would report executors missing that no executor is needed for.
 #[tauri::command]
 pub async fn list_tool_names() -> R<Vec<String>> {
-    Ok(note_core::ai::tools::all_tool_names()
+    Ok(note_core::ai::tools::frontend_tool_names()
         .into_iter()
         .map(String::from)
         .collect())

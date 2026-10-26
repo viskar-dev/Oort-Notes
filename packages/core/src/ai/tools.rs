@@ -169,10 +169,17 @@ pub fn tool_def(name: &str) -> Option<ToolDef> {
     all_tools().into_iter().find(|t| t.name == name)
 }
 
-/// All tool names, internal ones included (used by the `list_tool_names`
-/// command that checks registry vs frontend implementation coverage).
-pub fn all_tool_names() -> Vec<&'static str> {
-    all_tools().iter().map(|t| t.name).collect()
+/// Tool names the webview executes (frontend target, internal plumbing
+/// included) — the `list_tool_names` command feeds this to the frontend's
+/// registry/executor drift check. Rust-target tools run natively in
+/// dispatch and must not appear here: flagging them against the frontend
+/// executor set would report a false "the AI will fail those tools!".
+pub fn frontend_tool_names() -> Vec<&'static str> {
+    all_tools()
+        .into_iter()
+        .filter(|t| t.target == Target::Frontend)
+        .map(|t| t.name)
+        .collect()
 }
 
 /// Tools advertised to models / MCP clients (internal plumbing excluded).

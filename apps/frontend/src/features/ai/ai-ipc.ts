@@ -83,8 +83,8 @@ export function aiSetActiveCanvas(chapterId: string | null): Promise<void> {
   return run;
 }
 
-/** All registry tool names (internal plumbing included), for the startup
- *  check that every one of them has an executor here. */
+/** Tool names the webview executes (frontend target, internal plumbing
+ *  included), for the startup check that each one has an executor here. */
 export function aiListToolNames(): Promise<string[]> {
   return invoke<string[]>('list_tool_names');
 }
