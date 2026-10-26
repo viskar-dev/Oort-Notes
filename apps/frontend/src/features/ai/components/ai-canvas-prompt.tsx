@@ -1,8 +1,16 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Editor } from 'tldraw';
-import { useAiStore } from '../ai-store';
+import { useAiStore, type ConversationEvent } from '../ai-store';
 import { useAiCanvasPromptStore } from '../canvas-prompt-store';
 import { outlineShapes } from '../canvas-outline';
+
+/** The assistant's answer text inside a settled event slice. */
+function assistantText(events: ConversationEvent[]): string {
+  return events
+    .filter((event) => event.kind === 'agent' && event.role === 'assistant')
+    .map((event) => event.text)
+    .join('\n\n');
+}
 
 /** Renders nothing while closed (mounted unconditionally from CanvasShell). */
 export function AiCanvasPrompt({ getEditor }: { getEditor: () => Editor | null }) {
@@ -48,7 +56,15 @@ function AiCanvasPromptCard({
   const page = useAiCanvasPromptStore((s) => s.page);
   const selection = useAiCanvasPromptStore((s) => s.selection);
   const [input, setInput] = useState('');
+  /** The prompt of the turn this card is waiting on (alive until settled). */
+  const [pending, setPending] = useState<string | null>(null);
+  /** The latest settled answer shown here (stays until the next request). */
+  const [answer, setAnswer] = useState<string | null>(null);
+  const sliceStartRef = useRef(0);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  // Live transcript subscription: the answer streams in as the agent
+  // reports, before the turn's final (authoritative) settle.
+  const events = useAiStore((s) => s.events);
 
   // Focus when it opens (autofocus collides with the context menu's own
   // teardown — the card mounts after the menu closes).
@@ -58,6 +74,7 @@ function AiCanvasPromptCard({
   }, []);
 
   // Click elsewhere dismisses (the way every popover in the app behaves).
+  // A running turn keeps running — it sets in the transcript too.
   useEffect(() => {
     const onPointerDown = (event: PointerEvent) => {
       const target = event.target instanceof Element ? event.target : null;
@@ -76,6 +93,8 @@ function AiCanvasPromptCard({
   }, [onClose]);
 
   if (!page) return null;
+
+  const liveAnswer = assistantText(events.slice(sliceStartRef.current));
 
   const submit = () => {
     const text = input.trim();
@@ -105,9 +124,22 @@ function AiCanvasPromptCard({
     }
     const context = contextParts.join('\n\n');
 
+    const startIndex = useAiStore.getState().events.length;
+    sliceStartRef.current = startIndex;
     setInput('');
-    onClose();
-    void useAiStore.getState().send(text, context);
+    setPending(text);
+    setAnswer(null);
+    const settled = useAiStore.getState().send(text, context).then(
+      () => {
+        // The final list is authoritative; the store's tail (our slice's
+        // assistant text, streaming above) is replaced by it via settleTurn.
+        const error = useAiStore.getState().error;
+        setAnswer(assistantText(useAiStore.getState().events.slice(startIndex)) ||
+          (error ? `Request failed: ${error}` : 'No response text — the AI panel has the details.'));
+      },
+      () => setAnswer('Request failed — the AI panel has the details.'),
+    );
+    void settled.finally(() => setPending(null));
   };
 
   return (
@@ -120,6 +152,18 @@ function AiCanvasPromptCard({
       }}
       onPointerDown={(e) => e.stopPropagation()}
     >
+      {(pending !== null || answer !== null) && (
+        <div className="max-h-40 overflow-y-auto text-xs leading-relaxed whitespace-pre-wrap text-muted-foreground">
+          {pending !== null ? (
+            <span className="flex items-start gap-1.5">
+              <span className="mt-1 h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-primary" />
+              {liveAnswer ? <span>{liveAnswer}</span> : <span>Working…</span>}
+            </span>
+          ) : (
+            (answer ?? '')
+          )}
+        </div>
+      )}
       <textarea
         ref={textareaRef}
         rows={2}
@@ -135,8 +179,9 @@ function AiCanvasPromptCard({
         }}
       />
       <div className="text-right text-[10px] text-faint">
-        {selection.length > 0 ? `${selection.length} selected · ` : ''}
-        Enter to create · Esc to close
+        {pending !== null
+          ? 'working until it settles…'
+          : `${selection.length > 0 ? `${selection.length} selected · ` : ''}Enter to create · Esc to close`}
       </div>
     </div>
   );
