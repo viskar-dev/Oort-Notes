@@ -103,7 +103,7 @@ export function useAiBridge(
       const beginListener = await listen('canvas:begin', () => {
         // One undo anchor per mutating batch (the anchor set here makes the
         // whole batch a single Ctrl+Z step).
-        getEditor()?.mark('ai-batch');
+        getEditor()?.markHistoryStoppingPoint();
       });
       const endListener = await listen('canvas:end', () => {
         // Nothing to do; the anchor mark already closed the group.
