@@ -286,9 +286,14 @@ fn chat_tools() -> Result<Vec<ChatCompletionTool>, CoreError> {
 }
 
 /// Text-only message history plus the new user message → request messages.
+/// `context` carries per-turn situational bits (right-click anchoring, the
+/// selection): it rides as a system note right before the user message, so
+/// the transcript shows the clean prompt while the model still gets the
+/// situational data.
 fn build_request_messages(
     history: &[HistoryMessage],
     user_message: &str,
+    context: Option<&str>,
 ) -> Vec<ChatCompletionRequestMessage> {
     let mut messages = vec![
         ChatCompletionRequestSystemMessage { content: SYSTEM_PROMPT.into(), name: None }.into(),
@@ -311,6 +316,11 @@ fn build_request_messages(
                 .into(),
             ),
         }
+    }
+    if let Some(context) = context.map(str::trim).filter(|c| !c.is_empty()) {
+        messages.push(
+            ChatCompletionRequestSystemMessage { content: context.into(), name: None }.into(),
+        );
     }
     messages.push(
         ChatCompletionRequestUserMessage {
@@ -428,10 +438,11 @@ pub async fn run_agent(
     history: &[HistoryMessage],
     user_message: &str,
 ) -> Result<Vec<AgentEvent>, CoreError> {
-    run_agent_with_sink(client, ctx, history, user_message, None).await
+    run_agent_with_sink(client, ctx, history, user_message, None, None).await
 }
 
-/// Same loop with a live outlet. The returned list is still the authoritative
+/// Same loop with a live outlet and optional per-turn context (right-click
+/// anchoring, selection). The returned list is still the authoritative
 /// complete result; the sink only provides early access. A model failure
 /// after some tools ran never discards the transcript: it becomes a system
 /// event and the turn ends with what it produced.
@@ -440,9 +451,10 @@ pub async fn run_agent_with_sink(
     ctx: &DispatchCtx<'_>,
     history: &[HistoryMessage],
     user_message: &str,
+    context: Option<&str>,
     sink: Option<Box<dyn FnMut(AgentEvent) + Send>>,
 ) -> Result<Vec<AgentEvent>, CoreError> {
-    let mut messages = build_request_messages(history, user_message);
+    let mut messages = build_request_messages(history, user_message, context);
     let mut out = AgentOut { events: Vec::new(), sink };
     let chat_tools = chat_tools()?;
 
@@ -589,6 +601,27 @@ pub async fn run_agent_with_sink(
 mod tests {
     use super::*;
     use std::sync::{Arc, Mutex};
+
+    #[test]
+    fn turn_context_rides_as_a_system_note_before_the_user_message() {
+        let history = vec![HistoryMessage { role: "user".into(), content: "hi".into() }];
+        let msgs = build_request_messages(&history, "draw sevenscars", Some("anchored at (10, 20)"));
+        assert_eq!(msgs.len(), 4, "system, history user, context, prompt");
+        let ChatCompletionRequestMessage::System(system) = &msgs[2] else {
+            panic!("context must ride as a system note");
+        };
+        assert_eq!(system.content, "anchored at (10, 20)".into());
+        let ChatCompletionRequestMessage::User(prompt) = &msgs[3] else {
+            panic!("the prompt stays the user message");
+        };
+        assert_eq!(prompt.content, "draw sevenscars".into());
+
+        // Empty context behaves like none: no extra message.
+        let msgs = build_request_messages(&history, "x", Some("  "));
+        assert_eq!(msgs.len(), 3);
+        let msgs = build_request_messages(&history, "x", None);
+        assert_eq!(msgs.len(), 3);
+    }
 
     #[test]
     fn agent_out_streams_every_event_and_keeps_the_full_list() {

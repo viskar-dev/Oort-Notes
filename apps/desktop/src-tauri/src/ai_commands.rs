@@ -152,7 +152,9 @@ pub async fn rotate_mcp_token(
 // Agent turn
 // ---------------------------------------------------------------------
 
-/// Run one AI turn with the whole conversation. Returns the ordered event
+/// Run one AI turn with the whole conversation. `context` carries per-turn
+/// situational data (canvas anchoring, the selection) that stays out of the
+/// transcript. Returns the ordered event
 /// list for the chat UI — the authoritative result — while streaming each
 /// event to the webview (`ai:turn-event`) as it happens, so long turns
 /// render progressively. Requires a stored API key.
@@ -160,6 +162,7 @@ pub async fn rotate_mcp_token(
 pub async fn ai_chat(
     messages: Vec<llm::HistoryMessage>,
     user_message: String,
+    context: Option<String>,
     app: tauri::AppHandle,
     pool: State<'_, SqlitePool>,
     bridge: State<'_, std::sync::Arc<DesktopBridge>>,
@@ -184,6 +187,7 @@ pub async fn ai_chat(
         &ctx,
         &messages,
         &user_message,
+        context.as_deref(),
         Some(Box::new(move |event| {
             // A webview without the listener (or mid-teardown) simply misses
             // it; the final list is the turn's authority.

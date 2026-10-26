@@ -60,12 +60,15 @@ export function answerCanvasCall(
   return invoke<boolean>('canvas_result', { id, ok, error, result });
 }
 
-/** Run one AI turn (whole conversation in, event list out). */
+/** Run one AI turn (whole conversation in, event list out). `context`
+ *  carries per-turn situational data (canvas anchoring, selection) that the
+ *  UI keeps out of the transcript. */
 export function aiChat(
   messages: AiHistoryMessage[],
   userMessage: string,
+  context?: string | null,
 ): Promise<AiAgentEvent[]> {
-  return invoke<AiAgentEvent[]>('ai_chat', { messages, userMessage });
+  return invoke<AiAgentEvent[]>('ai_chat', { messages, userMessage, context });
 }
 
 /** Live agent events while a turn runs (`ai:turn-event`). Events streamed

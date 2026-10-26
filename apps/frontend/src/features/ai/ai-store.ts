@@ -22,7 +22,9 @@ interface AiState {
   /** Transport/turn failure shown at the bottom of the transcript. */
   error: string | null;
 
-  send: (userMessage: string) => Promise<void>;
+  /** One turn runs at a time; later requests (chat panel or the canvas
+   *  prompt) queue behind the current one instead of being dropped. */
+  send: (userMessage: string, context?: string | null) => Promise<void>;
   clear: () => void;
 }
 
@@ -56,6 +58,11 @@ export function settleTurn(
   return [...head, ...agentEvents.map((event) => ({ kind: 'agent' as const, ...event }))];
 }
 
+/** Turns are strictly sequential (see `send`): this chain hands from one
+ *  turn to the next. Module-level and never rejects — `send`'s turn body
+ *  catches its own failures. */
+let turnChain: Promise<void> = Promise.resolve();
+
 export const useAiStore = create<AiState>((set, get) => ({
   open: false,
   setOpen: (open) => set({ open, error: open ? null : get().error }),
@@ -65,36 +72,42 @@ export const useAiStore = create<AiState>((set, get) => ({
   busy: false,
   error: null,
 
-  send: async (userMessage) => {
+  send: (userMessage, context) => {
     const text = userMessage.trim();
-    if (text.length === 0 || get().busy) return;
-    set({ busy: true, error: null });
-    const withPrompt: ConversationEvent[] = [...get().events, { kind: 'user', text }];
-    set({ events: withPrompt });
-    // Subscribe BEFORE the invoke: event delivery races the final list.
-    const unlisten = await listenAiTurnEvents((event) => {
-      if (!get().busy) return; // a late straggler after teardown
-      set({ events: [...get().events, { kind: 'agent' as const, ...event }] });
-    });
-    try {
-      const agentEvents = await aiChat(historyOf(withPrompt), text);
-      // Stop the stream before settling: a straggler payload that arrives
-      // between the invoke resolving and this point must not append after
-      // the authoritative replace and duplicate the tail.
-      unlisten();
-      set({ events: settleTurn(get().events, agentEvents) });
-    } catch (error) {
-      // Tool events that streamed before the failure stay in the
-      // transcript — the turn's work is never thrown away.
-      set({ error: error instanceof Error ? error.message : String(error) });
-    } finally {
+    if (text.length === 0) return turnChain;
+    const turn = async () => {
+      set({ busy: true, error: null });
+      const withPrompt: ConversationEvent[] = [...get().events, { kind: 'user', text }];
+      set({ events: withPrompt });
+      // Subscribe BEFORE the invoke: event delivery races the final list.
+      const unlisten = await listenAiTurnEvents((event) => {
+        if (!get().busy) return; // a late straggler after teardown
+        set({ events: [...get().events, { kind: 'agent' as const, ...event }] });
+      });
       try {
+        const agentEvents = await aiChat(historyOf(withPrompt), text, context);
+        // Stop the stream before settling: a straggler payload that arrives
+        // between the invoke resolving and this point must not append after
+        // the authoritative replace and duplicate the tail.
         unlisten();
-      } catch {
-        // Double-unlisten is harmless.
+        set({ events: settleTurn(get().events, agentEvents) });
+      } catch (error) {
+        // Tool events that streamed before the failure stay in the
+        // transcript — the turn's work is never thrown away.
+        set({ error: error instanceof Error ? error.message : String(error) });
+      } finally {
+        try {
+          unlisten();
+        } catch {
+          // Double-unlisten is harmless.
+        }
+        set({ busy: false });
       }
-      set({ busy: false });
-    }
+    };
+    // Sequential turns: a request typed into the canvas prompt while a turn
+    // runs queues behind it (its context anchors independently).
+    turnChain = turnChain.then(turn, turn);
+    return turnChain;
   },
 
   clear: () => set({ events: [], error: null }),

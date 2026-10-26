@@ -9,7 +9,9 @@ import {
   useValue,
 } from 'tldraw';
 import type { TLUiContextMenuProps } from 'tldraw';
+import { isTauri } from '@tauri-apps/api/core';
 import { useIconFinderStore } from '@/stores/icon-finder-store';
+import { useAiCanvasPromptStore } from '@/features/ai/canvas-prompt-store';
 import { OortContextMenuContentWithPdf } from '@/components/global/canvas/ExportAsMenu';
 
 /**
@@ -27,6 +29,22 @@ function OortContextMenuContent() {
   return (
     <>
       <OortContextMenuContentWithPdf />
+      {isTauri() && (
+        <TldrawUiMenuGroup id="oort-ai">
+          {/* Opens the anchored floating prompt at the right-click spot; the
+              geometry was already snapshotted by the canvas shell's capture
+              listener the moment this right-click happened. Deliberately kept
+              free of blur/pointer handling (see ContextBlurGuard) — the card
+              mounts after this menu closes. */}
+          <TldrawUiMenuItem
+            id="oort-ai-help"
+            label="AI help…"
+            onSelect={() => {
+              useAiCanvasPromptStore.getState().openPrompt();
+            }}
+          />
+        </TldrawUiMenuGroup>
+      )}
       {!readonly && (
         <TldrawUiMenuGroup id="oort-insert">
           <TldrawUiMenuItem

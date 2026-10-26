@@ -18,6 +18,7 @@ import { ViewModeContext } from '@/features/canvas/view-mode';
 import { CanvasTopBar } from '@/features/canvas/components/canvas-top-bar';
 import { AiChatPanel, AiConfirmCard } from '@/features/ai/components/ai-chat-panel';
 import { useAiStore } from '@/features/ai/ai-store';
+import { AiCanvasPrompt } from '@/features/ai/components/ai-canvas-prompt';
 import { useAiBridge } from '@/features/ai/use-ai-bridge';
 import { ZoomSlotContext } from '@/components/global/canvas/PresetToolbar';
 import { CanvasSettingsCard } from '@/components/global/canvas/CanvasSettingsCard';
@@ -304,6 +305,8 @@ export function CanvasShell({ notebook, chapter }: { notebook: Notebook; chapter
             <>
               <AiChatPanel />
               <AiConfirmCard />
+              {/* right-click → "AI help…": floating anchored prompt */}
+              <AiCanvasPrompt getEditor={getEditor} />
             </>
           )}
 
