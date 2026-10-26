@@ -145,6 +145,11 @@ pub fn all_tools() -> Vec<ToolDef> {
             a::DeleteShapesArgs, true, false, frontend
         ),
         def!(
+            "add_page",
+            "Add a new empty sheet (page) to a page-type canvas. The sheet joins one topic's stack. If you do not pass topic_id and the canvas has several topics, the tool returns status \"requires_input\" with the topic list — surface that choice to the user in your client (or pick the marked \"active\": true topic yourself when the intent is clear) and re-send with topic_id. On single-topic canvases no decision is needed.",
+            a::AddPageArgs, false, false, frontend
+        ),
+        def!(
             "focus_viewport",
             "Move the canvas viewport so the given shapes (or all content when the list is empty) fit nicely on screen.",
             a::FocusViewportArgs, false, false, frontend

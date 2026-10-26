@@ -175,6 +175,12 @@ export function useChapterCanvas(
 
   const [topics, setTopics] = useState<Topic[]>([]);
   const [activeTopicId, setActiveTopicId] = useState<string | null>(null);
+  // Sync mirror for sync readers (the AI's page capability reads topic state
+  // outside the render flow).
+  const activeTopicRef = useRef<string | null>(null);
+  useEffect(() => {
+    activeTopicRef.current = activeTopicId;
+  }, [activeTopicId]);
   const [fitMode, setFitMode] = useState<FitMode>('screen');
   const fitModeRef = useRef<FitMode>('screen');
   const [error, setError] = useState<string | null>(null);
@@ -412,6 +418,47 @@ export function useChapterCanvas(
       }
     })();
   }, [activeTopicId, isPageChapter, applyStackConstraints, goToSheet]);
+
+  /// AI capability: extend a topic's sheet stack. The active topic walks the
+  /// same state/constraint/camera path as `addSheet`; a non-active topic just
+  /// gains a persisted row (it lays out when the user opens that topic).
+  const aiAddPage = useCallback(
+    async (topicId: string): Promise<{ id: string; name: string; index: number }> => {
+      if (!isPageChapter) throw new Error('not a page chapter');
+      if (topicId === activeTopicId) {
+        const created = await api.createTopicPage(topicId, String(activePagesRef.current.length + 1));
+        activePagesRef.current = [...activePagesRef.current, created];
+        setActivePages(activePagesRef.current);
+        const editor = editorRef.current;
+        if (editor) {
+          applyStackConstraints(editor, activePagesRef.current.length);
+          goToSheet(activePagesRef.current.length - 1);
+        }
+        return { id: created.id, name: created.name, index: activePagesRef.current.length - 1 };
+      }
+      const rows = await api.listTopicPages(topicId).catch(() => []);
+      const created = await api.createTopicPage(topicId, String(rows.length + 1));
+      return { id: created.id, name: created.name, index: rows.length };
+    },
+    [isPageChapter, activeTopicId, applyStackConstraints, goToSheet],
+  );
+
+  /// The AI's view of the page stacks (sync; called per tool call). The
+  /// active topic carries its sheet count so decision requests can be
+  /// informed.
+  const aiPages = useCallback(
+    () => ({
+      active_topic_id: activeTopicRef.current,
+      topics: topicsRef.current.map((t) => ({
+        id: t.id,
+        name: t.name,
+        page_count:
+          t.id === activeTopicRef.current ? activePagesRef.current.length : undefined,
+      })),
+      addPage: aiAddPage,
+    }),
+    [aiAddPage],
+  );
 
   /// Page-mode sheet containment: shapes live inside the sheet regions of
   /// the stack — never in the gap between two sheets. Re-registered when the
@@ -813,6 +860,7 @@ export function useChapterCanvas(
     refit,
     goToSheet,
     addSheet,
+    aiPages,
     renameTopic,
     duplicateTopic,
     deleteTopic,

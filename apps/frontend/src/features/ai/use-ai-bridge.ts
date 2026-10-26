@@ -9,7 +9,7 @@ import {
   type AiCanvasCall,
 } from './ai-ipc';
 import { missingExecutors, handleCanvasCall, type BridgeIo } from './bridge';
-import { executeAiTool, type AiExecutorDeps } from './executors';
+import { executeAiTool, type AiExecutorDeps, type AiPagesCapability } from './executors';
 import { useAiConfirmStore } from './confirm-store';
 import { useViewModeStore } from '@/stores/view-mode-store';
 
@@ -25,15 +25,23 @@ export function useAiBridge(
   chapterId: string,
   getEditor: () => Editor | null,
   /** Chapter rendering context (pages-mode geometry) for the executors. */
-  getContext?: () => { canvas_type: string; page: { width: number; height: number; gap: number; count: number } | null },
+  getContext?: () => {
+    canvas_type: string;
+    page: { width: number; height: number; gap: number; count: number } | null;
+  },
+  /** Pages-mode capability (topics + addPage) for the add_page executor. */
+  getPages?: () => AiPagesCapability | null,
 ): void {
   // Shared, chapter-independent executor deps; only `editor` is fresh per call.
   // getContext goes through a ref so the context stays live (sheet count etc).
   const contextRef = useRef(getContext);
   contextRef.current = getContext;
+  const pagesRef = useRef(getPages);
+  pagesRef.current = getPages;
   const depsRef = useRef<Omit<AiExecutorDeps, 'editor'>>({
     context: () =>
       contextRef.current?.() ?? { canvas_type: 'infinite', page: null },
+    pages: () => pagesRef.current?.() ?? null,
     confirm: (title, detail) =>
       useAiConfirmStore.getState().requestConfirm(title, detail),
     readOnly: () => useViewModeStore.getState().on,

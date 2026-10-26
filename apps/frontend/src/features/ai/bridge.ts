@@ -80,6 +80,7 @@ export const EXECUTED_TOOLS = [
   'create_svg',
   'create_diagram',
   'create_shapes',
+  'add_page',
   'update_shapes',
   'delete_shapes',
   'focus_viewport',

@@ -272,6 +272,16 @@ pub struct CreateChapterArgs {
     pub page_height: Option<i64>,
 }
 
+/// Extend a page-type canvas with a new sheet in a topic's stack. The topic
+/// is the decision: omit it and the tool answers with the options.
+#[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
+pub struct AddPageArgs {
+    /// The topic whose stack gets the new sheet. Omitted ⇒ the tool returns
+    /// `status: "requires_input"` listing the topics (an MCP client surfaces
+    /// the choice in its own conversation and re-sends with the id).
+    pub topic_id: Option<String>,
+}
+
 /// List canvases (chapters) across all notebooks.
 #[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
 pub struct ListCanvasesArgs {

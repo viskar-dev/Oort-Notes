@@ -75,6 +75,7 @@ export function CanvasShell({ notebook, chapter }: { notebook: Notebook; chapter
     refit,
     goToSheet,
     addSheet,
+    aiPages,
     getEditor,
   } = useChapterCanvas(chapter, paddingRef, deeplink, insetRef);
 
@@ -83,19 +84,25 @@ export function CanvasShell({ notebook, chapter }: { notebook: Notebook; chapter
 
   // AI bridge: desktop only — pins this chapter as the AI's canvas and
   // answers the backend's `canvas:call` tool invocations. The context makes
-  // pages-mode geometry (sheet size/count) visible to the tool executors.
-  useAiBridge(chapter.id, getEditor, () => ({
-    canvas_type: chapter.canvas_type,
-    page:
-      isPageChapter && chapter.page_width && chapter.page_height
-        ? {
-            width: chapter.page_width,
-            height: chapter.page_height,
-            gap: SHEET_GAP,
-            count: activePages.length,
-          }
-        : null,
-  }));
+  // pages-mode geometry (sheet size/count) visible to the tool executors;
+  // the pages capability lets `add_page` extend the sheet stacks.
+  useAiBridge(
+    chapter.id,
+    getEditor,
+    () => ({
+      canvas_type: chapter.canvas_type,
+      page:
+        isPageChapter && chapter.page_width && chapter.page_height
+          ? {
+              width: chapter.page_width,
+              height: chapter.page_height,
+              gap: SHEET_GAP,
+              count: activePages.length,
+            }
+          : null,
+    }),
+    aiPages,
+  );
 
   const pageView = usePageView({
     chapter,

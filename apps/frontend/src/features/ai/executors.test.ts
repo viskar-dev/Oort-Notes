@@ -222,8 +222,7 @@ describe('executeAiTool routing', () => {
     expect(editor.deleteShapes).toHaveBeenCalledWith(['shape:a']);
   }, 5000);
 
-  it('mcp delete returns requires_confirmation without any desktop UI', async () => {
-    const confirmSpy = vi.fn();
+  it('mcp delete returns requires_confirmation without any desktop UI', async () => {    const confirmSpy = vi.fn();
     useAiConfirmStore.setState({ requestConfirm: confirmSpy });
     const editor = {
       ...makeEditor(),
@@ -341,5 +340,90 @@ describe('executeAiTool routing', () => {
       executeAiTool(d, 'create_shapes', { shapes: [{ type: 'geo', props: { w: 4 } }] }),
     ).rejects.toThrow('geo shapes need numeric "w" and "h"');
     expect(editor.createShape).not.toHaveBeenCalled();
+  });
+
+  // -----------------------------------------------------------------
+  // add_page: the topic is a decision the caller makes
+  // -----------------------------------------------------------------
+
+  /** Pages capability: two topics, first one active with two sheets. */
+  function pagesDeps(overrides: Partial<Parameters<typeof addPageCapability>[0]> = {}): {
+    deps: AiExecutorDeps;
+    addPage: ReturnType<typeof vi.fn>;
+  } {
+    const addPage = vi.fn(async (topicId: string) => ({
+      id: 'tp:new',
+      name: String(topicId === 't1' ? 3 : 1),
+      index: topicId === 't1' ? 2 : 0,
+    }));
+    const capability = {
+      active_topic_id: 't1',
+      topics: [
+        { id: 't1', name: 'Reflection', page_count: 2 },
+        { id: 't2', name: 'Refraction' },
+      ],
+      addPage,
+      ...overrides,
+    };
+    const d = {
+      ...deps(),
+      context: () => ({
+        canvas_type: 'page' as const,
+        page: { width: 800, height: 1100, gap: 40, count: 2 },
+      }),
+      pages: () => capability,
+    };
+    return { deps: d, addPage };
+  }
+
+  function addPageCapability() {
+    return { active_topic_id: '', topics: [] as Array<{ id: string; name: string }>, addPage: async () => ({ id: '', name: '', index: 0 }) };
+  }
+
+  it('add_page asks the caller which topic via requires_input (no desktop UI)', async () => {
+    const { deps: d } = pagesDeps();
+    const confirmSpy = vi.fn();
+    useAiConfirmStore.setState({ requestConfirm: confirmSpy });
+    const value = await executeAiTool(d, 'add_page', {});
+    expect(value.status).toBe('requires_input');
+    expect(value.input).toBe('topic_id');
+    expect(String(value.prompt).includes('topic_id')).toBe(true);
+    const options = value.topics as Array<{ id: string; name: string; page_count?: number; active?: boolean }>;
+    expect(options).toHaveLength(2);
+    expect(options.find((t) => t.id === 't1')).toMatchObject({ name: 'Reflection', page_count: 2, active: true });
+    expect(options.find((t) => t.id === 't2')).toMatchObject({ name: 'Refraction' });
+    expect(options.find((t) => t.id === 't2')!.page_count).toBeUndefined();
+    expect(confirmSpy).not.toHaveBeenCalled();
+  });
+
+  it('add_page creates directly when the model picks a topic_id', async () => {
+    const { deps: d, addPage } = pagesDeps();
+    const value = await executeAiTool(d, 'add_page', { topic_id: 't2' });
+    expect(addPage).toHaveBeenCalledWith('t2');
+    expect(value).toMatchObject({ created_page: { id: 'tp:new', index: 0 }, topic: { name: 'Refraction' } });
+  });
+
+  it('add_page uses the only topic without a decision', async () => {
+    const { deps: d, addPage } = pagesDeps({
+      topics: [{ id: 'only', name: 'Solo', page_count: 1 }],
+      active_topic_id: 'only',
+    });
+    const value = await executeAiTool(d, 'add_page', {});
+    expect(addPage).toHaveBeenCalledWith('only');
+    expect(value.topic).toEqual({ id: 'only', name: 'Solo' });
+    expect(value.status).toBeUndefined();
+  });
+
+  it('add_page rejects unknown topic ids with the topic names', async () => {
+    const { deps: d } = pagesDeps();
+    await expect(executeAiTool(d, 'add_page', { topic_id: 'nope' })).rejects.toThrow(
+      'no topic with id "nope"',
+    );
+  });
+
+  it('add_page fails readably off pages mode', async () => {
+    await expect(executeAiTool(deps(), 'add_page', { topic_id: 't1' })).rejects.toThrow(
+      'page-type canvases only',
+    );
   });
 });

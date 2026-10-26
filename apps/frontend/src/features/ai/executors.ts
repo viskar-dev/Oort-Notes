@@ -43,6 +43,7 @@ const MUTATING_TOOLS = new Set([
   'create_svg',
   'create_diagram',
   'create_shapes',
+  'add_page',
   'update_shapes',
   'delete_shapes',
 ]);
@@ -53,6 +54,24 @@ const MUTATING_TOOLS = new Set([
 const CREATE_TYPES = new Set(['geo', 'text', 'note', 'arrow', 'line', 'frame', 'svg-diagram']);
 
 const DEFAULT_NOTE_W = 220;
+
+/** Pages-mode capability the canvas shell exposes to the AI: extends a
+ *  topic's sheet stack through the same path the toolbar's "+ page" button
+ *  walks (state + stack constraints + camera). */
+export interface AiPagesOption {
+  id: string;
+  name: string;
+  /** Sheet count; filled for the active topic only. */
+  page_count?: number;
+}
+
+export interface AiPagesCapability {
+  /** The topic whose stack the canvas currently shows. */
+  active_topic_id: string | null;
+  topics: AiPagesOption[];
+  /** Add one sheet to the topic's stack; returns the persisted page row. */
+  addPage: (topicId: string) => Promise<{ id: string; name: string; index: number }>;
+}
 
 export interface AiExecutorDeps {
   editor: Editor;
@@ -66,6 +85,8 @@ export interface AiExecutorDeps {
    *  `confirm`; MCP-origin calls confirm inside the client's own
    *  conversation (`confirmed` arg) and must never trigger desktop UI. */
   origin: 'assistant' | 'mcp';
+  /** Pages-mode sheet stacks (page-type canvases); missing elsewhere. */
+  pages?: () => AiPagesCapability | null;
 }
 
 type ToolArgs = Record<string, unknown>;
@@ -117,6 +138,8 @@ export async function executeAiTool(
       return await deleteShapes(deps, args);
     case 'focus_viewport':
       return focusViewport(deps.editor, args);
+    case 'add_page':
+      return await addPage(deps, args);
     default:
       throw new Error(`no executor for "${name}"`);
   }
@@ -854,6 +877,73 @@ function deleteShapes(deps: AiExecutorDeps, args: ToolArgs): Promise<ToolValue> 
     });
     return { deleted: existing.map(String) } as ToolValue;
   });
+}
+
+/** Structured decision request: the caller (an MCP client) surfaces this in
+ *  its own conversation and re-sends the call with the chosen input. Nothing
+ *  pops up on the desktop — this shape is the whole interaction. */
+function requiresInput(input: string, prompt: string, extra: ToolArgs): ToolValue {
+  return { status: 'requires_input', input, prompt, ...extra };
+}
+
+/** add_page: extend a topic's sheet stack on a page-type canvas. The topic
+ *  is a decision: several topics without an explicit choice return
+ *  `requires_input` with the options (id, name, sheet count, active flag) —
+ *  the client's model can show them to the user, and the model can also
+ *  decide itself and resend with `topic_id`. */
+async function addPage(deps: AiExecutorDeps, args: ToolArgs): Promise<ToolValue> {
+  const ctx = deps.context();
+  if (ctx.canvas_type !== 'page') {
+    throw new Error('add_page works on page-type canvases only (their topics are sheet stacks)');
+  }
+  const capability = deps.pages?.() ?? null;
+  if (!capability) {
+    throw new Error('this canvas shell does not expose page stacks');
+  }
+
+  const topics = capability.topics;
+  const requested =
+    typeof args.topic_id === 'string' && args.topic_id.trim() !== '' ? args.topic_id.trim() : null;
+
+  if (requested) {
+    const target = topics.find((t) => t.id === requested);
+    if (!target) {
+      const names = topics
+        .slice(0, 4)
+        .map((t) => `"${t.name}"`)
+        .join(', ');
+      throw new Error(
+        `no topic with id "${requested}" on this canvas` +
+          (topics.length
+            ? ` — topics are: ${names}${topics.length > 4 ? '…' : ''}`
+            : ' (no topics exist yet)'),
+      );
+    }
+    const created = await capability.addPage(requested);
+    return { created_page: created, topic: { id: target.id, name: target.name } };
+  }
+
+  if (topics.length === 0) {
+    throw new Error('this canvas has no topics yet — the user must create one first');
+  }
+  if (topics.length === 1) {
+    const created = await capability.addPage(topics[0].id);
+    return { created_page: created, topic: { id: topics[0].id, name: topics[0].name } };
+  }
+
+  // The decision lives with the caller (see the module contract above).
+  return requiresInput(
+    'topic_id',
+    'This canvas has several topics — which one gets the new page? Pick a topic_id from the list and re-send add_page with it.',
+    {
+      topics: topics.map((t) => ({
+        id: t.id,
+        name: t.name,
+        page_count: t.page_count,
+        ...(t.id === capability.active_topic_id ? { active: true } : {}),
+      })),
+    },
+  );
 }
 
 function focusViewport(editor: Editor, args: ToolArgs): ToolValue {

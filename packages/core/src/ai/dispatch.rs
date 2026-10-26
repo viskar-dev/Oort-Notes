@@ -95,6 +95,7 @@ fn validate_args(name: &str, args: Value) -> Result<(), CoreError> {
         "create_svg" => serde_json::from_value::<a::CreateSvgArgs>(args).map(|_| ()),
         "create_diagram" => serde_json::from_value::<a::CreateDiagramArgs>(args).map(|_| ()),
         "create_shapes" => serde_json::from_value::<a::CreateShapesArgs>(args).map(|_| ()),
+        "add_page" => serde_json::from_value::<a::AddPageArgs>(args).map(|_| ()),
         "update_shapes" => serde_json::from_value::<a::UpdateShapesArgs>(args).map(|_| ()),
         "delete_shapes" => serde_json::from_value::<a::DeleteShapesArgs>(args).map(|_| ()),
         "focus_viewport" => serde_json::from_value::<a::FocusViewportArgs>(args).map(|_| ()),
