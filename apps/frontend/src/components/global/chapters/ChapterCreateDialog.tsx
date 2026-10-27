@@ -14,7 +14,7 @@ export function ChapterCreateDialog({
 }) {
   return (
     <Dialog open onOpenChange={(next) => !next && onClose()}>
-      <DialogContent className="max-h-[85vh] max-w-[440px] overflow-y-auto">
+      <DialogContent className="max-h-[85vh] max-w-[440px] m-10  overflow-y-auto">
         <DialogHeader>
           <DialogTitle>New chapter</DialogTitle>
           <DialogDescription>

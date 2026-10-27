@@ -1,7 +1,6 @@
 import { SettingsLayout } from '@/components/layout/settings-layout';
 import { ConfirmAlertDialog } from '@/components/global/common/ConfirmAlertDialog';
 import { BackupConnectionCard } from '@/components/global/backup/BackupConnectionCard';
-import { BackupOAuthConfig } from '@/components/global/backup/BackupOAuthConfig';
 import { BackupStateCard } from '@/components/global/backup/BackupStateCard';
 import { BackupImportCard } from '@/components/global/backup/BackupImportCard';
 import { BackupScheduleCard } from '@/components/global/backup/BackupScheduleCard';
@@ -28,11 +27,6 @@ export function BackupPage() {
             {bp.error}
           </div>
         )}
-        {bp.notice && !bp.error && (
-          <div className="mt-4 rounded-lg bg-emerald-950/60 px-3 py-2 text-[13px] text-emerald-300">
-            {bp.notice}
-          </div>
-        )}
 
         <div className="mt-8">
           {/* ── Section 1 · Google Drive (connection + backup state merged) ── */}
@@ -45,9 +39,9 @@ export function BackupPage() {
               onDisconnect={bp.handleDisconnect}
               onToggleConfig={bp.toggleConfig}
             />
-            {bp.showConfig && (
+            {/*{bp.showConfig && (
               <BackupOAuthConfig config={bp.config} onSave={bp.handleSaveConfig} />
-            )}
+            )}*/}
             {/* former “Your backup” card, folded into this section */}
             <BackupStateCard
               connected={bp.connected}

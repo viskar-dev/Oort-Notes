@@ -12,7 +12,26 @@ import { missingExecutors, handleCanvasCall, type BridgeIo } from './bridge';
 import { executeAiTool, type AiExecutorDeps, type AiPagesCapability } from './executors';
 import { useAiConfirmStore } from './confirm-store';
 import { useAiPolicyStore } from './policy-store';
+import { useAiBusyStore } from './busy-store';
 import { useViewModeStore } from '@/stores/view-mode-store';
+
+/**
+ * Give the renderer two frames to commit + remeasure after an executor ran,
+ * before the model reads geometry back. A short timeout backs it up so a
+ * hidden/minimized webview (where rAF stalls) can never wedge the bridge.
+ */
+async function renderSettle(): Promise<void> {
+  const frames = new Promise<void>((resolve) => {
+    let done = 0;
+    const tick = () => {
+      done += 1;
+      if (done >= 2) resolve();
+      else requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  });
+  await Promise.race([frames, new Promise<void>((resolve) => setTimeout(resolve, 120))]);
+}
 
 /**
  * Canvas-shell side of the AI bridge (desktop only):
@@ -39,7 +58,7 @@ export function useAiBridge(
   contextRef.current = getContext;
   const pagesRef = useRef(getPages);
   pagesRef.current = getPages;
-  const depsRef = useRef<Omit<AiExecutorDeps, 'editor'>>({
+  const depsRef = useRef<Omit<AiExecutorDeps, 'editor' | 'origin'>>({
     context: () =>
       contextRef.current?.() ?? { canvas_type: 'infinite', page: null },
     pages: () => pagesRef.current?.() ?? null,
@@ -73,6 +92,11 @@ export function useAiBridge(
       answer: async (id, ok, error, result) => {
         await answerCanvasCall(id, ok, error, result);
       },
+      busy: {
+        begin: () => useAiBusyStore.getState().begin(),
+        end: () => useAiBusyStore.getState().end(),
+      },
+      settle: renderSettle,
     };
 
     void (async () => {

@@ -5,6 +5,7 @@
 //! either store it in the OS keychain or report presence as a boolean.
 
 use serde_json::Value;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{Emitter, State};
 use sqlx::SqlitePool;
 
@@ -157,6 +158,18 @@ pub async fn rotate_mcp_token(
 // Agent turn
 // ---------------------------------------------------------------------
 
+/// Stop flag for the in-flight agent turn: the panel's Stop button flips it
+/// through `ai_cancel_turn`, and the agent loop honors it between tool
+/// boundaries (an in-flight tool still finishes). Reset at every turn start.
+static TURN_CANCELLED: AtomicBool = AtomicBool::new(false);
+
+/// Press Stop: ask the running agent turn to end at its next boundary.
+/// Returns the flag's previous value (true ⇒ a request was already pending).
+#[tauri::command]
+pub async fn ai_cancel_turn() -> bool {
+    TURN_CANCELLED.swap(true, Ordering::SeqCst)
+}
+
 /// Run one AI turn with the whole conversation. `context` carries per-turn
 /// situational data (canvas anchoring, the selection) that stays out of the
 /// transcript. Returns the ordered event
@@ -172,6 +185,8 @@ pub async fn ai_chat(
     pool: State<'_, SqlitePool>,
     bridge: State<'_, std::sync::Arc<DesktopBridge>>,
 ) -> R<Vec<llm::AgentEvent>> {
+    // No leftover Stop press may survive into a fresh turn.
+    TURN_CANCELLED.store(false, Ordering::SeqCst);
     let config = ai::config::load_config(&pool).await.map_err(map)?;
     let api_key = tauri::async_runtime::spawn_blocking(ai::config::get_api_key)
         .await
@@ -193,6 +208,7 @@ pub async fn ai_chat(
         &messages,
         &user_message,
         context.as_deref(),
+        Some(&TURN_CANCELLED),
         Some(Box::new(move |event| {
             // A webview without the listener (or mid-teardown) simply misses
             // it; the final list is the turn's authority.

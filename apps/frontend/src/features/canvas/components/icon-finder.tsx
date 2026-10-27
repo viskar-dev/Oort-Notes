@@ -175,7 +175,7 @@ export function IconFinder({ open, onClose }: { open: boolean; onClose: () => vo
     <Dialog open={open} onOpenChange={(next) => !next && onClose()} modal={false}>
       <DialogContent
         className="flex h-[70vh] max-w-[min(640px,calc(100vw-2rem))] flex-col gap-3 p-4 sm:max-w-[min(640px,calc(100vw-2rem))]"
-        overlay={false}
+        showOverlay={false}
       >
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">

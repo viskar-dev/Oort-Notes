@@ -8,7 +8,7 @@ mod ai_mcp;
 
 // Tauri's generate_handler! needs the command wrappers in this scope.
 use ai_commands::{
-    ai_chat, canvas_result, clear_api_key, get_ai_config, get_mcp_connection_info,
+    ai_cancel_turn, ai_chat, canvas_result, clear_api_key, get_ai_config, get_mcp_connection_info,
     has_api_key, list_tool_names, rotate_mcp_token, set_active_canvas, set_ai_config, set_api_key,
 };
 
@@ -654,22 +654,46 @@ async fn restore_and_show(
 
 /// Called by the frontend after mount: swaps the native frame for the
 /// embedded caption panel and reveals the (initially hidden) window. Falls
-/// back to the plain native titlebar when activation fails.
+/// back to the plain native titlebar only after backoff retries — at cold
+/// boot the one-shot activation sometimes loses an internal race, and the
+/// same call succeeds right after (that used to leave the default header
+/// in place until the user refreshed the page).
 #[tauri::command]
 async fn activate_and_show(window: WebviewWindow) -> Result<&'static str, String> {
-    if let Err(error) = window.activate_decoration().await {
-        return restore_and_show(&window, error).await;
+    let mut last_error = String::from("activation failed");
+    for attempt in 0..5u32 {
+        match window.activate_decoration().await {
+            Ok(()) => {
+                if let Err(error) = set_traffic_lights_inset(&window).await {
+                    last_error = error;
+                } else if let Err(error) = window.show() {
+                    last_error = error.to_string();
+                } else {
+                    return Ok("custom");
+                }
+            }
+            Err(error) => last_error = error.to_string(),
+        }
+        if attempt < 4 {
+            tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        }
     }
+    restore_and_show(&window, last_error).await
+}
 
-    #[cfg(target_os = "macos")]
-    if let Err(error) = window.set_traffic_lights_inset(16.0, 20.0).await {
-        return restore_and_show(&window, error).await;
-    }
+/// One activation step's macOS traffic-light positioning; a no-op platform
+/// elsewhere (kept as cfg'd helpers so the retry loop stays cfg-free).
+#[cfg(target_os = "macos")]
+async fn set_traffic_lights_inset(window: &WebviewWindow) -> Result<(), String> {
+    window
+        .set_traffic_lights_inset(16.0, 20.0)
+        .await
+        .map_err(|error| format!("traffic lights: {error}"))
+}
 
-    match window.show() {
-        Ok(()) => Ok("custom"),
-        Err(error) => restore_and_show(&window, error).await,
-    }
+#[cfg(not(target_os = "macos"))]
+async fn set_traffic_lights_inset(_window: &WebviewWindow) -> Result<(), String> {
+    Ok(())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -761,6 +785,7 @@ pub fn run() {
             get_mcp_connection_info,
             rotate_mcp_token,
             ai_chat,
+            ai_cancel_turn,
             canvas_result,
         ])
         .run(tauri::generate_context!())

@@ -30,7 +30,6 @@ export function BackupConnectionCard({
             className={`inline-block h-1.5 w-1.5 rounded-full ${connected ? 'bg-emerald-500' : 'bg-red-500'}`}
           />
           {connected ? 'Connected' : status?.configured ? 'Not connected' : 'Not configured'}
-          {connected && status?.email ? ` — ${status.email}` : ''}
         </span>
       </div>
       <div className="flex shrink-0 items-center gap-1">

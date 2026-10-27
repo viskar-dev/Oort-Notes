@@ -6,6 +6,7 @@ import { useViewModeStore } from '@/stores/view-mode-store';
 import { SHEET_GAP, type FitMode } from '@/hooks/canvas/use-chapter-canvas';
 import type { Chapter, Topic } from '@/lib/ipc';
 import { errorText } from '@/lib/utils';
+import { toast } from 'sonner';
 
 interface PageViewParams {
   chapter: Chapter;
@@ -37,7 +38,6 @@ export function usePageView({
 }: PageViewParams) {
   const [viewMode, setViewMode] = useState(false);
   const [exporting, setExporting] = useState(false);
-  const [exportError, setExportError] = useState<string | null>(null);
 
   // the keydown handler reads the index through a ref so the listener
   // doesn't need to re-bind on every page flip
@@ -105,11 +105,10 @@ export function usePageView({
 
   // PDF export: the open topic's sheet stack, one PDF page per sheet. The
   // ⋮ menu's and right-click menu's "Export as" → PDF rows go through here;
-  // errors surface through the same canvas toast as before.
+  // the result surfaces through the app toast.
   const handleExportPdf = useCallback(() => {
     const editor = getEditor();
     if (!editor || !isPageChapter || !chapter.page_width || !chapter.page_height) return;
-    setExportError(null);
     setExporting(true);
     exportChapterToPdf(editor, {
       pageWidth: chapter.page_width,
@@ -118,7 +117,8 @@ export function usePageView({
       gap: SHEET_GAP,
       fileName: activeTopic ? activeTopic.name : chapter.name,
     })
-      .catch((e) => setExportError(errorText(e)))
+      .then(() => toast.success('PDF exported', { description: `${Math.max(activePageCount, 1)} sheet(s)` }))
+      .catch((e) => toast.error('PDF export failed', { description: errorText(e) }))
       .finally(() => setExporting(false));
   }, [getEditor, isPageChapter, chapter.page_width, chapter.page_height, chapter.name, activePageCount, activeTopic]);
 
@@ -158,5 +158,5 @@ export function usePageView({
     };
   }, [isPageChapter, refit]);
 
-  return { viewMode, toggleViewMode, exporting, exportError, handleExportPdf, canvasAreaRef };
+  return { viewMode, toggleViewMode, exporting, handleExportPdf, canvasAreaRef };
 }

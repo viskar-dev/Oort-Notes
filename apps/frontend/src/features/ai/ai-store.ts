@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { aiChat, listenAiTurnEvents, type AiAgentEvent, type AiHistoryMessage } from './ai-ipc';
+import { useAiGhostStore } from './ghost-store';
 import { useViewModeStore } from '@/stores/view-mode-store';
 
 /**
@@ -101,6 +102,7 @@ export const useAiStore = create<AiState>((set, get) => ({
         } catch {
           // Double-unlisten is harmless.
         }
+        useAiGhostStore.getState().clear();
         set({ busy: false });
       }
     };

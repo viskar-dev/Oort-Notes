@@ -36,8 +36,8 @@ export function PresetColorsTab({
 
   return (
     <div>
-      <h3 className="text-sm font-medium text-ink">Colors</h3>
-      <p className="mt-1 text-[13px] text-muted-foreground">
+      <h3 className="mb-1 text-base font-semibold">Colors</h3>
+      <p className="mb-4 text-sm text-muted-foreground">
         Click a swatch to pick a color; click the name to include or exclude it
         from the palette.
       </p>
@@ -49,8 +49,8 @@ export function PresetColorsTab({
           return (
             <div
               key={c}
-              className={`relative flex flex-col items-center gap-1.5 rounded-lg p-3 transition-opacity ${
-                hidden ? 'opacity-35' : 'hover:bg-white/[0.04]'
+              className={`relative flex flex-col items-center gap-1.5 rounded-xl border p-3 transition-all ${
+                hidden ? 'border-line/50 opacity-35' : 'border-line hover:border-primary/60'
               }`}
             >
               {/* the swatch opens the dark theme picker popover */}

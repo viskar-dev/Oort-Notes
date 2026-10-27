@@ -44,9 +44,41 @@
 :root {
   --tauri-plugin-decoration-titlebar-height: 56px;
   --tauri-plugin-decoration-z-index: 9999;
+  /* shadcn base tokens live on the Oort dark palette (the app is dark-only;
+     the .dark block below carries the identical set). */
+  --background: #09090b;
+  --foreground: #f2f2f3;
+  --card: #111016;
+  --card-foreground: #f4f4f6;
+  --popover: #111016;
+  --popover-foreground: #f4f4f6;
+  --primary: #7c6ee6;
+  --primary-foreground: #ffffff;
+  --secondary: #17161c;
+  --secondary-foreground: #f4f4f6;
+  --muted: #17161c;
+  --muted-foreground: #8b8a96;
+  --accent: #17161c;
+  --accent-foreground: #f4f4f6;
+  --destructive: oklch(0.704 0.191 22.216);
+  --border: #24232c;
+  --input: #24232c;
+  --ring: #7c6ee6;
+  --chart-1: oklch(0.87 0 0);
+  --chart-2: oklch(0.556 0 0);
+  --chart-3: oklch(0.439 0 0);
+  --chart-4: oklch(0.371 0 0);
+  --chart-5: oklch(0.269 0 0);
+  --radius: 0.625rem;
+  --sidebar: #111016;
+  --sidebar-foreground: #f4f4f6;
+  --sidebar-primary: #7c6ee6;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #17161c;
+  --sidebar-accent-foreground: #f4f4f6;
+  --sidebar-border: #24232c;
+  --sidebar-ring: #7c6ee6;
 }
-
-
 
 /* thin scrollbars: 4px, transparent track, thumb appears on container hover */
 * {
@@ -261,7 +293,7 @@ textarea:focus-visible,
 
 @theme inline {
   --font-heading: var(--font-sans);
-  --font-sans: 'Inter Variable', 'Geist Variable', system-ui, sans-serif;
+  --font-sans: 'Geist Variable', sans-serif;
   --color-chart-5: var(--chart-5);
   --color-chart-4: var(--chart-4);
   --color-chart-3: var(--chart-3);
@@ -292,27 +324,35 @@ textarea:focus-visible,
   --radius-2xl: calc(var(--radius) * 1.5);
   --radius-3xl: calc(var(--radius) * 1.9);
   --radius-4xl: calc(var(--radius) * 2.2);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
 }
 
 :root {
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
+  --background: #09090b;
+  --foreground: #f2f2f3;
+  --card: #111016;
+  --card-foreground: #f4f4f6;
+  --popover: #111016;
+  --popover-foreground: #f4f4f6;
+  --primary: #7c6ee6;
+  --primary-foreground: #ffffff;
+  --secondary: #17161c;
+  --secondary-foreground: #f4f4f6;
+  --muted: #17161c;
+  --muted-foreground: #8b8a96;
+  --accent: #17161c;
+  --accent-foreground: #f4f4f6;
+  --destructive: oklch(0.704 0.191 22.216);
+  --border: #24232c;
+  --input: #24232c;
+  --ring: #7c6ee6;
   --chart-1: oklch(0.87 0 0);
   --chart-2: oklch(0.556 0 0);
   --chart-3: oklch(0.439 0 0);
@@ -324,29 +364,37 @@ textarea:focus-visible,
 }
 
 .dark {
-  --background: #060608;
-  --foreground: #f4f4f6;
+  --background: #09090b;
+  --foreground: #f2f2f3;
   --card: #111016;
   --card-foreground: #f4f4f6;
-  --popover: #14141a;
+  --popover: #111016;
   --popover-foreground: #f4f4f6;
   --primary: #7c6ee6;
   --primary-foreground: #ffffff;
   --secondary: #17161c;
   --secondary-foreground: #f4f4f6;
   --muted: #17161c;
-  --muted-foreground: #a09fab;
+  --muted-foreground: #8b8a96;
   --accent: #17161c;
   --accent-foreground: #f4f4f6;
-  --destructive: #f87171;
+  --destructive: oklch(0.704 0.191 22.216);
   --border: #24232c;
-  --input: #17161c;
+  --input: #24232c;
   --ring: #7c6ee6;
   --chart-1: oklch(0.87 0 0);
   --chart-2: oklch(0.556 0 0);
   --chart-3: oklch(0.439 0 0);
   --chart-4: oklch(0.371 0 0);
   --chart-5: oklch(0.269 0 0);
+  --sidebar: #111016;
+  --sidebar-foreground: #f4f4f6;
+  --sidebar-primary: #7c6ee6;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #17161c;
+  --sidebar-accent-foreground: #f4f4f6;
+  --sidebar-border: #24232c;
+  --sidebar-ring: #7c6ee6;
 }
 
 @layer base {
@@ -360,7 +408,6 @@ textarea:focus-visible,
     @apply font-sans;
   }
 }
-
 
 .tl-watermark_SEE-LICENSE {
   display: none !important;
@@ -378,23 +425,25 @@ body.canvas-chrome-hidden
   transition-duration: 100ms;
 }
 
-/* native caption buttons: hover recolors the glyph to the app accent
-   (iris, like the AI chip) instead of the platform's background fill —
-   `body` prefix out-ranks the plugin stylesheet, which is injected later */
-body [data-tauri-plugin-decoration-root] [data-tauri-decoration-control]:hover,
-body
-  [data-tauri-plugin-decoration-root]
-  [data-tauri-decoration-control][data-tauri-decoration-hover] {
+/* native caption buttons: the plugin paints bright glyphs (#f5f5f5 in dark
+   schemes) with stock hover fills — white 10% everywhere, and a bright red
+   band under the close button whose rule outranks a plain override. Sit on
+   the chrome: dim gray glyphs, transparent fill, iris glyph on hover (the
+   extra [data-tauri-decoration-platform] / control="close" attribute
+   selectors out-rank every variant the plugin stylesheet has, injected
+   later though it is) */
+body [data-tauri-plugin-decoration-root] [data-tauri-decoration-control],
+body [data-tauri-plugin-decoration-root] [data-tauri-decoration-platform] [data-tauri-decoration-control] {
+  color: var(--color-fg-2);
   background: transparent;
-  color: var(--color-iris);
 }
-body
-  [data-tauri-plugin-decoration-root]
-  [data-tauri-decoration-control="close"]:hover,
-body
-  [data-tauri-plugin-decoration-root]
-  [data-tauri-decoration-control="close"][data-tauri-decoration-hover] {
-  background: transparent;
+body [data-tauri-plugin-decoration-root] [data-tauri-decoration-control]:hover,
+body [data-tauri-plugin-decoration-root] [data-tauri-decoration-control][data-tauri-decoration-hover],
+body [data-tauri-plugin-decoration-root] [data-tauri-decoration-platform] [data-tauri-decoration-control]:hover,
+body [data-tauri-plugin-decoration-root] [data-tauri-decoration-platform] [data-tauri-decoration-control][data-tauri-decoration-hover],
+body [data-tauri-plugin-decoration-root] [data-tauri-decoration-platform] [data-tauri-decoration-control="close"]:hover,
+body [data-tauri-plugin-decoration-root] [data-tauri-decoration-platform] [data-tauri-decoration-control="close"][data-tauri-decoration-hover] {
+  background: rgba(255, 255, 255, 0.06);
   color: var(--color-iris);
 }
 body.canvas-chrome-hidden [data-tauri-plugin-decoration-root],

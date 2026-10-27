@@ -80,6 +80,13 @@ export function listenAiTurnEvents(
   return listen<AiAgentEvent>('ai:turn-event', (event) => handler(event.payload));
 }
 
+/** Press Stop on a running turn: the backend flips a flag the agent loop
+ *  honors between tool boundaries (an in-flight tool still finishes, so the
+ *  invoke settles shortly after). Returns the flag's previous value. */
+export function aiCancelTurn(): Promise<boolean> {
+  return invoke<boolean>('ai_cancel_turn');
+}
+
 /** Point the AI at this canvas (null clears the pointer).
  *
  *  Calls are serialized deliberately: opening a canvas fires `pin(chapterA)`

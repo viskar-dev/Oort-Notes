@@ -26,13 +26,13 @@ export function PresetSizesTab({
         {ENTRIES.map(({ key, label }) => (
           <div key={key} className="flex items-center gap-4 rounded-xl border border-line bg-surface px-5 py-4">
             <span
-              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-raised font-bold"
-              style={{ fontSize: Math.min(config.sizes[key], 26) }}
+              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-raised text-white/80 font-bold"
+              style={{ fontSize: Math.min(config.sizes[key], 16) }}
             >
               {label}
             </span>
             <label className="flex-1 text-sm text-muted-foreground">
-              {label === 'p' ? 'Paragraph (default text)' : `Heading ${label[1]} — level ${label[1]}`} in px
+              {label === 'p' ? 'Paragraph (default text)' : `Heading ${label[1]}  level ${label[1]}`} in px
             </label>
             <input
               type="number"

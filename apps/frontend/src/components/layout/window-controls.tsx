@@ -60,7 +60,7 @@ export function WindowControls({ className = '' }: { className?: string }) {
         onClick={() => void appWindow.toggleMaximize()}
         className={BTN}
       >
-        {maximized ? <Copy size={16} /> : <Square size={16} />}
+        {maximized ? <Copy size={16} className='transform -scale-y-100"' /> : <Square size={16} />}
       </button>
       <button
         title="Close"

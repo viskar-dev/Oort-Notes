@@ -3,6 +3,9 @@ import type { Editor } from 'tldraw';
 import { useAiStore, type ConversationEvent } from '../ai-store';
 import { useAiCanvasPromptStore } from '../canvas-prompt-store';
 import { outlineShapes } from '../canvas-outline';
+import { useCameraTick } from '../use-camera-tick';
+import { MessageResponse } from '@/components/ai-elements/message';
+import { OortMark } from './ai-mark';
 
 /** The assistant's answer text inside a settled event slice. */
 function assistantText(events: ConversationEvent[]): string {
@@ -60,11 +63,9 @@ function AiCanvasPromptCard({
   const [pending, setPending] = useState<string | null>(null);
   /** The latest settled answer shown here (stays until the next request). */
   const [answer, setAnswer] = useState<string | null>(null);
-  const sliceStartRef = useRef(0);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  // Live transcript subscription: the answer streams in as the agent
-  // reports, before the turn's final (authoritative) settle.
-  const events = useAiStore((s) => s.events);
+  // Camera moves must re-place the card once it is world-anchored.
+  useCameraTick(getEditor);
 
   // Focus when it opens (autofocus collides with the context menu's own
   // teardown — the card mounts after the menu closes).
@@ -73,16 +74,21 @@ function AiCanvasPromptCard({
     return () => window.clearTimeout(id);
   }, []);
 
-  // Click elsewhere dismisses (the way every popover in the app behaves).
-  // A running turn keeps running — it sets in the transcript too.
+  // Click elsewhere dismisses (the way every popover in the app behaves) —
+  // but only once a submitted turn has settled. While the card is working
+  // (or showing its fresh answer), clicking the canvas keeps it anchored:
+  // the turn runs in the background and the answer lands whenever the user
+  // comes back. The canvas stays fully interactive meanwhile.
   useEffect(() => {
+    const busy = pending !== null;
     const onPointerDown = (event: PointerEvent) => {
       const target = event.target instanceof Element ? event.target : null;
       if (target && target.closest('[data-testid="ai-canvas-prompt"]')) return;
+      if (busy) return;
       onClose();
     };
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose();
+      if (event.key === 'Escape' && !busy) onClose();
     };
     document.addEventListener('pointerdown', onPointerDown, true);
     document.addEventListener('keydown', onKeyDown);
@@ -90,11 +96,23 @@ function AiCanvasPromptCard({
       document.removeEventListener('pointerdown', onPointerDown, true);
       document.removeEventListener('keydown', onKeyDown);
     };
-  }, [onClose]);
+  }, [onClose, pending]);
 
   if (!page) return null;
 
-  const liveAnswer = assistantText(events.slice(sliceStartRef.current));
+  const working = pending !== null;
+  const expanded = answer !== null;
+  const anchored = working || expanded;
+
+  // World anchor: idle the card floats at the right-click's screen position;
+  // from submit onwards it is pinned to the canvas position the request was
+  // anchored to — pan/zoom moves it with the content, so the user can travel
+  // the canvas (chase the ghost glows) while the turn runs.
+  let pos = at;
+  if (anchored) {
+    const editor = getEditor();
+    if (editor && typeof editor.pageToScreen === 'function') pos = editor.pageToScreen(page);
+  }
 
   const submit = () => {
     const text = input.trim();
@@ -102,6 +120,7 @@ function AiCanvasPromptCard({
       onClose();
       return;
     }
+    if (working) return; // turns queue in the store; one submission at a time here
 
     // The anchor context stays out of the transcript: it ships as per-turn
     // system context. New shapes go exactly under the right-click point;
@@ -125,14 +144,13 @@ function AiCanvasPromptCard({
     const context = contextParts.join('\n\n');
 
     const startIndex = useAiStore.getState().events.length;
-    sliceStartRef.current = startIndex;
     setInput('');
     setPending(text);
     setAnswer(null);
     const settled = useAiStore.getState().send(text, context).then(
       () => {
-        // The final list is authoritative; the store's tail (our slice's
-        // assistant text, streaming above) is replaced by it via settleTurn.
+        // The final list is authoritative; the store's tail (our slice) is
+        // replaced by it via settleTurn.
         const error = useAiStore.getState().error;
         setAnswer(assistantText(useAiStore.getState().events.slice(startIndex)) ||
           (error ? `Request failed: ${error}` : 'No response text — the AI panel has the details.'));
@@ -142,33 +160,14 @@ function AiCanvasPromptCard({
     void settled.finally(() => setPending(null));
   };
 
-  return (
-    <div
-      data-testid="ai-canvas-prompt"
-      className="fixed z-50 flex w-72 flex-col gap-1 rounded-xl bg-popover p-2 text-popover-foreground ring-1 ring-foreground/10 shadow-lg"
-      style={{
-        left: Math.min(at.x, window.innerWidth - 320),
-        top: Math.min(at.y, window.innerHeight - 96),
-      }}
-      onPointerDown={(e) => e.stopPropagation()}
-    >
-      {(pending !== null || answer !== null) && (
-        <div className="max-h-40 overflow-y-auto text-xs leading-relaxed whitespace-pre-wrap text-muted-foreground">
-          {pending !== null ? (
-            <span className="flex items-start gap-1.5">
-              <span className="mt-1 h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-primary" />
-              {liveAnswer ? <span>{liveAnswer}</span> : <span>Working…</span>}
-            </span>
-          ) : (
-            (answer ?? '')
-          )}
-        </div>
-      )}
+  const inputRow = (
+    <div className="flex items-center gap-2">
+      <OortMark working={working} />
       <textarea
         ref={textareaRef}
-        rows={2}
-        placeholder="What should the AI do right here?"
-        className="resize-none bg-transparent text-sm outline-none placeholder:text-faint"
+        rows={1}
+        placeholder={working ? 'Working on it…' : 'What should the AI do right here?'}
+        className="min-h-5 flex-1 resize-none bg-transparent text-sm outline-none placeholder:text-faint"
         value={input}
         onChange={(e) => setInput(e.target.value)}
         onKeyDown={(e) => {
@@ -178,11 +177,53 @@ function AiCanvasPromptCard({
           }
         }}
       />
-      <div className="text-right text-[10px] text-faint">
-        {pending !== null
-          ? 'working until it settles…'
-          : `${selection.length > 0 ? `${selection.length} selected · ` : ''}Enter to create · Esc to close`}
-      </div>
+      {!working && selection.length > 0 && (
+        <span className="shrink-0 rounded-full bg-foreground/8 px-1.5 py-0.5 text-[10px] text-faint">
+          {selection.length}
+        </span>
+      )}
+    </div>
+  );
+
+  return (
+    <div
+      data-testid="ai-canvas-prompt"
+      className={[
+        'fixed z-50 flex flex-col bg-[#111016] text-[#f4f4f6] ring-1 ring-[#24232c] shadow-lg shadow-black/25',
+        expanded
+          ? 'w-80 gap-2 rounded-2xl p-2'
+          : working
+            ? 'h-11 w-11 items-center justify-center rounded-full'
+            : 'w-80 flex-row items-center rounded-full py-2 pr-2 pl-3',
+      ].join(' ')}
+      style={{
+        left: Math.min(
+          pos.x,
+          Math.max(0, window.innerWidth - (expanded ? 344 : 64)),
+        ),
+        top: Math.min(pos.y, Math.max(0, window.innerHeight - 120)),
+      }}
+      onPointerDown={(e) => e.stopPropagation()}
+    >
+      {expanded ? (
+        <>
+          {/* The settled answer (markdown), pinned to the canvas spot the
+              request was anchored to. The live glow state lives on the
+              canvas itself — ghost cards at the size of what is created. */}
+          <div className="max-h-56 overflow-y-auto px-1 text-xs leading-relaxed">
+            <MessageResponse className="text-xs">{answer ?? ''}</MessageResponse>
+          </div>
+          {inputRow}
+        </>
+      ) : working ? (
+        // Working: ONLY the spinning mark — the glowing ghost cards on the
+        // canvas tell the story of what is being produced and where.
+        <span aria-hidden className="flex items-center justify-center">
+          <OortMark working size={22} />
+        </span>
+      ) : (
+        inputRow
+      )}
     </div>
   );
 }

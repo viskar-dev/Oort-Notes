@@ -24,6 +24,7 @@ import { buildRichDocument } from './rich-text';
 import { confirmShapeDeletion } from './confirm-store';
 import type { AiDestructivePolicy } from './policy-store';
 import { layoutDiagram } from './diagram-layout';
+import { useAiGhostStore, ghostConfig } from './ghost-store';
 
 /** What the executors need to know about the chapter rendering context
  *  (pages-mode geometry). Provided by the canvas shell via use-ai-bridge. */
@@ -44,6 +45,7 @@ const MUTATING_TOOLS = new Set([
   'create_svg',
   'create_diagram',
   'create_shapes',
+  'convert_selection',
   'add_page',
   'update_shapes',
   'delete_shapes',
@@ -134,6 +136,8 @@ export async function executeAiTool(
       return await createSvg(deps, args);
     case 'create_diagram':
       return createDiagram(deps, args);
+    case 'convert_selection':
+      return await convertSelection(deps, args);
     case 'create_shapes':
       return createShapes(deps, args);
     case 'update_shapes':
@@ -207,6 +211,23 @@ function getShape(editor: Editor, args: ToolArgs): ToolValue {
   const state = fullShapeState(editor, id as TLShapeId);
   if (!state) throw new Error(`no shape with id ${id} on this canvas`);
   return state;
+}
+
+// ---------------------------------------------------------------------------
+// ghost glow: the canvas announces what is about to land
+// ---------------------------------------------------------------------------
+
+/** Two painted frames plus a short beat: the glow has to hit the screen and
+ *  read as "forming here" before the real shapes replace it. Skips the rAF
+ *  part where frames don't exist (hidden webviews, bare test environments) —
+ *  the timer alone still gives the glow its moment. */
+async function ghostDwell(): Promise<void> {
+  if (typeof requestAnimationFrame === 'function') {
+    await new Promise<void>((resolve) =>
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+    );
+  }
+  await new Promise<void>((resolve) => setTimeout(resolve, ghostConfig.dwellMs));
 }
 
 // ---------------------------------------------------------------------------
@@ -572,7 +593,7 @@ async function createSvg(deps: AiExecutorDeps, args: ToolArgs): Promise<ToolValu
 /** tldraw geo values for the schema's simple node kinds. */
 const GEO_KINDS = { rect: 'rectangle', round: 'roundRectangle', diamond: 'diamond' } as const;
 
-function createDiagram(deps: AiExecutorDeps, args: ToolArgs): ToolValue {
+async function createDiagram(deps: AiExecutorDeps, args: ToolArgs): Promise<ToolValue> {
   const editor = deps.editor;
   const rawNodes = asArray(args, 'nodes');
   const rawEdges = args.edges;
@@ -619,9 +640,16 @@ function createDiagram(deps: AiExecutorDeps, args: ToolArgs): ToolValue {
   const at = planPlacement(editor, deps, args, Math.min(boxW, 2000), Math.min(boxH, 2000));
   const dx = at.x - minX;
   const dy = at.y - minY;
-  const createdNodes: TLShapeId[] = [];
-  const createdArrows: TLShapeId[] = [];
-  editor.run(() => {
+  // Ghost first: the exact diagram box glows where the creation compute
+  // already placed it, then the real shapes replace it after the beat.
+  const ghostId = useAiGhostStore.getState().push([
+    { x: at.x, y: at.y, w: Math.min(boxW, 2000), h: Math.min(boxH, 2000) },
+  ]);
+  try {
+    await ghostDwell();
+    const createdNodes: TLShapeId[] = [];
+    const createdArrows: TLShapeId[] = [];
+    editor.run(() => {
     for (const node of nodes) {
       const placement = layout.nodes.get(node.id)!;
       const scaleFactor = node.shape === 'diamond' ? 1.25 : 1;
@@ -680,15 +708,86 @@ function createDiagram(deps: AiExecutorDeps, args: ToolArgs): ToolValue {
       createdArrows.push(id);
     }
   });
-  return {
-    created: { nodes: createdNodes, arrows: createdArrows },
-    shape_ids: createdNodes,
-    x: round(at.x),
-    y: round(at.y),
-    w: round(boxW),
-    h: round(boxH),
-    warnings: layout.warnings,
-  };
+    return {
+      created: { nodes: createdNodes, arrows: createdArrows },
+      shape_ids: createdNodes,
+      x: round(at.x),
+      y: round(at.y),
+      w: round(boxW),
+      h: round(boxH),
+      warnings: layout.warnings,
+    };
+  } finally {
+    useAiGhostStore.getState().remove(ghostId);
+  }
+}
+
+/** convert_selection: swap the user's selection for a flow diagram the model
+ *  designed from its content. The selection is re-read live here — the model
+ *  never names the shapes it may delete — the diagram is built by the exact
+ *  create_diagram path (validation, layout, placement), pinned to the
+ *  selection's top-left, and only then are the originals removed. Nothing is
+ *  lost if the model's diagram arg is invalid: an error raises before any
+ *  edit happens. Destructive, mirroring delete_shapes: MCP callers confirm
+ *  inside their own conversation; the assistant confirms in the app card. */
+async function convertSelection(deps: AiExecutorDeps, args: ToolArgs): Promise<ToolValue> {
+  const editor = deps.editor;
+  const selected = [...editor.getSelectedShapeIds()].map(String);
+  if (selected.length === 0) {
+    throw new Error('nothing is selected: the user must select shapes on the canvas to convert them');
+  }
+
+  if (
+    deps.origin === 'mcp' &&
+    args.confirmed !== true &&
+    deps.destructivePolicy() !== 'auto_confirm'
+  ) {
+    return {
+      status: 'requires_confirmation',
+      count: selected.length,
+      prompt:
+        `Convert ${selected.length} selected shape(s) into a diagram? The originals are deleted. ` +
+        'Re-send convert_selection with the same nodes/edges and "confirmed": true.',
+    };
+  }
+  const approved =
+    deps.origin === 'assistant'
+      ? deps.confirm(
+          'Convert selection?',
+          selected.length === 1
+            ? 'The selected shape becomes a flow diagram — the original is removed.'
+            : `The ${selected.length} selected shapes become one flow diagram — the originals are removed.`,
+        )
+      : Promise.resolve(true);
+  if (!(await approved)) {
+    throw new Error('convert cancelled by the user');
+  }
+
+  // The diagram takes the selection's place: pin x/y to the selection's
+  // top-left. create_diagram honors explicit x/y exactly (planning skipped),
+  // so the new diagram appears where the old content stood.
+  let x: number | undefined;
+  let y: number | undefined;
+  for (const id of selected) {
+    const bounds = editor.getShapePageBounds(id as TLShapeId);
+    if (bounds) {
+      x = x === undefined ? bounds.x : Math.min(x, bounds.x);
+      y = y === undefined ? bounds.y : Math.min(y, bounds.y);
+    }
+  }
+  const pinned: ToolArgs = x === undefined ? args : { ...args, x, y };
+
+  const created = await createDiagram(deps, pinned);
+
+  // Success is the delete trigger. Ids re-checked: anything the user removed
+  // mid-turn is skipped rather than resurrecting an error.
+  const stale = selected.filter((id) => !!editor.getShape(id as TLShapeId));
+  if (stale.length > 0) {
+    editor.run(() => {
+      editor.deleteShapes(stale.map((id) => id as TLShapeId));
+    });
+  }
+  return { ...created, deleted: stale };
 }
 
 /** Rough planned footprint for one create_shapes entry. Placement only —
@@ -714,12 +813,13 @@ function plannedSize(type: string, props: ToolArgs): { w: number; h: number } {
   }
 }
 
-/** An entry position set by the model itself (honored exactly, no planning). */
-const hasExplicitXY = (entry: ToolArgs): boolean =>
+/** An entry position set by the model itself (honored exactly, no planning).
+ *  A guard, so callers get `x`/`y` narrowed to numbers after the check. */
+const hasExplicitXY = (entry: ToolArgs): entry is ToolArgs & { x: number; y: number } =>
   typeof entry.x === 'number' && Number.isFinite(entry.x) &&
   typeof entry.y === 'number' && Number.isFinite(entry.y);
 
-function createShapes(deps: AiExecutorDeps, args: ToolArgs): ToolValue {
+async function createShapes(deps: AiExecutorDeps, args: ToolArgs): Promise<ToolValue> {
   const editor = deps.editor;
   const entries: ToolArgs[] = asArray(args, 'shapes');
 
@@ -753,34 +853,54 @@ function createShapes(deps: AiExecutorDeps, args: ToolArgs): ToolValue {
     cursor = { x: anchor.x, y: anchor.y };
   }
 
-  const created: string[] = [];
-  editor.run(() => {
-    for (const { entry, index, type, size } of ok) {
-      try {
-        const id = typeof entry.id === 'string' && entry.id.startsWith('shape:')
-          ? (entry.id as TLShapeId)
-          : newShapeId();
-        let x: number;
-        let y: number;
-        if (cursor === null) {
-          // Every entry is explicit: no planning touched the coordinates.
-          x = typeof entry.x === 'number' && Number.isFinite(entry.x) ? entry.x : 0;
-          y = typeof entry.y === 'number' && Number.isFinite(entry.y) ? entry.y : 0;
-        } else if (hasExplicitXY(entry)) {
-          x = entry.x;
-          y = entry.y;
-        } else {
-          x = cursor.x;
-          y = cursor.y;
-          cursor.y += size.h + LAYOUT_GAP;
-        }
-        editor.createShape({ id, type, x, y, props: entry.props && typeof entry.props === 'object' ? entry.props : {} } as Parameters<Editor['createShape']>[0]);
-        created.push(id);
-      } catch (error) {
-        errors.push(`shape ${index}: ${error instanceof Error ? error.message : String(error)}`);
-      }
+  // Positions are resolved BEFORE any editor write: the ghost layer needs
+  // the batch's exact final footprint, and the run loop just applies them.
+  const placements: Array<{ x: number; y: number }> = [];
+  for (const { entry, size } of ok) {
+    if (cursor === null) {
+      // Every entry is explicit: no planning touched the coordinates.
+      const x = typeof entry.x === 'number' && Number.isFinite(entry.x) ? entry.x : 0;
+      const y = typeof entry.y === 'number' && Number.isFinite(entry.y) ? entry.y : 0;
+      placements.push({ x, y });
+    } else if (hasExplicitXY(entry)) {
+      placements.push({ x: entry.x, y: entry.y });
+    } else {
+      placements.push({ x: cursor.x, y: cursor.y });
+      cursor.y += size.h + LAYOUT_GAP;
     }
-  });
+  }
+
+  const created: string[] = [];
+  if (placements.length > 0) {
+    // One glow card over the whole committed batch: the ghost is the union
+    // of the exact boxes the loop is about to apply.
+    const minX = Math.min(...placements.map((p) => p.x));
+    const minY = Math.min(...placements.map((p) => p.y));
+    const maxX = Math.max(...placements.map((p, i) => p.x + ok[i].size.w));
+    const maxY = Math.max(...placements.map((p, i) => p.y + ok[i].size.h));
+    const ghostId = useAiGhostStore.getState().push([
+      { x: minX, y: minY, w: maxX - minX, h: maxY - minY },
+    ]);
+    try {
+      await ghostDwell();
+      editor.run(() => {
+        for (const [placeIndex, { entry, index, type }] of ok.entries()) {
+          try {
+            const id = typeof entry.id === 'string' && entry.id.startsWith('shape:')
+              ? (entry.id as TLShapeId)
+              : newShapeId();
+            const { x, y } = placements[placeIndex];
+            editor.createShape({ id, type, x, y, props: entry.props && typeof entry.props === 'object' ? entry.props : {} } as Parameters<Editor['createShape']>[0]);
+            created.push(id);
+          } catch (error) {
+            errors.push(`shape ${index}: ${error instanceof Error ? error.message : String(error)}`);
+          }
+        }
+      });
+    } finally {
+      useAiGhostStore.getState().remove(ghostId);
+    }
+  }
   if (created.length === 0 && errors.length > 0) {
     throw new Error(errors[0]);
   }

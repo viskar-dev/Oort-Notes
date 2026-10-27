@@ -1,6 +1,7 @@
 import { useCallback, useState } from 'react';
 import type { Notebook } from '@/lib/ipc';
 import { errorText } from '@/lib/utils';
+import { toast } from 'sonner';
 import type { NotebookFlagChanges, NotebookCreateInput } from '@/hooks/notebooks/use-notebook-list';
 
 /** The create/rename/delete dialog commands for the notebooks home: which
@@ -33,6 +34,7 @@ export function useNotebookDialogs({
     try {
       await createNotebook(input);
       closeCreate();
+      toast.success('Notebook created', { description: input.name });
     } catch (e) {
       onError(errorText(e));
     }
@@ -43,6 +45,7 @@ export function useNotebookDialogs({
     try {
       await updateNotebook(renaming, { name });
       closeRename();
+      toast.success('Notebook renamed', { description: name });
     } catch (e) {
       onError(errorText(e));
     }
@@ -53,6 +56,7 @@ export function useNotebookDialogs({
     try {
       await deleteNotebook(deleting);
       closeDelete();
+      toast.success('Notebook deleted', { description: deleting.name });
     } catch (e) {
       onError(errorText(e));
     }

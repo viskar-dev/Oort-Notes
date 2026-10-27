@@ -1,21 +1,22 @@
-import { useCallback } from 'react';
+import { useCallback, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus } from 'lucide-react';
 import type { Notebook } from '@/lib/ipc';
 import { errorText } from '@/lib/utils';
-import { APP_CONTAINER, WorkspaceLayout } from '@/components/layout/workspace-layout';
+import { HOME_CONTAINER, WorkspaceLayout } from '@/components/layout/workspace-layout';
 import { NotebooksHeader } from '@/components/global/notebooks/NotebooksHeader';
 import { NotebookFilterRow } from '@/components/global/notebooks/NotebookFilterRow';
 import { NotebookCard } from '@/components/global/notebooks/NotebookCard';
+import { NotebookRow } from '@/components/global/notebooks/NotebookRow';
 import { NotebookEmptyState } from '@/components/global/notebooks/NotebookEmptyState';
 import { NotebookCreateDialog } from '@/components/global/notebooks/NotebookCreateDialog';
 import { NotebookRenameDialog } from '@/components/global/notebooks/NotebookRenameDialog';
 import { NotebookDeleteDialog } from '@/components/global/notebooks/NotebookDeleteDialog';
 import { useNotebookList, type NotebookFlagChanges } from '@/hooks/notebooks/use-notebook-list';
 import { useNotebookDialogs } from '@/hooks/notebooks/use-notebook-dialogs';
+import { toast } from 'sonner';
 
 /** Route: '/'. The notebooks home — search (server-side, debounced), filter
- *  tabs, sort and the whole notebook lifecycle via dialogs. */
+ *  tabs, sort, view mode and the whole notebook lifecycle via dialogs. */
 export function NotebooksPage() {
   const navigate = useNavigate();
 
@@ -24,14 +25,18 @@ export function NotebooksPage() {
     createNotebook: list.createNotebook,
     updateNotebook: list.updateNotebook,
     deleteNotebook: list.deleteNotebook,
-    onError: list.setError,
+    onError: (message) => toast.error('Notebook action failed', { description: message }),
   });
+
+  // presentation-only view state: same data and handlers in two skins
+  const [view, setView] = useState<'list' | 'grid'>('list');
 
   const handleUpdate = useCallback(async (nb: Notebook, flags: NotebookFlagChanges) => {
     try {
       await list.updateNotebook(nb, flags);
+      toast.success('Notebook updated', { description: nb.name });
     } catch (e) {
-      list.setError(errorText(e));
+      toast.error('Could not update notebook', { description: errorText(e) });
     }
   }, [list]);
 
@@ -44,43 +49,59 @@ export function NotebooksPage() {
   const totalChapters = notebooks.reduce((acc, n) => acc + n.chapters_count, 0);
   const hasQuery = list.search.trim() !== '';
 
+  const search = {
+    value: list.search,
+    onChange: list.setSearch,
+    placeholder: 'Filter notebooks...',
+  };
+
   return (
     <WorkspaceLayout
-      search={{ value: list.search, onChange: list.setSearch, placeholder: 'Search notebooks' }}
+      container={HOME_CONTAINER}
       crumbs={[{ label: 'Notebooks' }]}
+      showFooter={false}
+      syncDot
     >
-      <NotebooksHeader
-        loaded={list.notebooks !== null}
-        notebookCount={notebooks.length}
-        chapterCount={totalChapters}
-        onCreate={dialogs.openCreate}
-      />
+      {/* section stagger: header → controls → list */}
+      <div className="animate-[fadeUp_240ms_ease-out_both]" style={{ animationDelay: '0ms' }}>
+        <NotebooksHeader
+          loaded={list.notebooks !== null}
+          notebookCount={notebooks.length}
+          chapterCount={totalChapters}
+          onCreate={dialogs.openCreate}
+        />
+      </div>
 
       {list.error && (
-        <div className={`${APP_CONTAINER} mt-4`}>
-          <div className="rounded-lg border border-[#24232c] bg-[#111016] px-4 py-3 text-sm text-[#f87171]">
+        <div className={`${HOME_CONTAINER} mt-4`}>
+          <div className="rounded-lg border border-white/[0.08] bg-white/[0.03] px-4 py-3 text-sm text-[#f87171]">
             {list.error}
           </div>
         </div>
       )}
 
-      <NotebookFilterRow
-        filter={list.filter}
-        sort={list.sort}
-        onFilterChange={list.setFilter}
-        onSortChange={list.setSort}
-      />
+      <div className="animate-[fadeUp_240ms_ease-out_both]" style={{ animationDelay: '40ms' }}>
+        <NotebookFilterRow
+          filter={list.filter}
+          sort={list.sort}
+          search={search}
+          view={view}
+          onViewChange={setView}
+          count={list.notebooks === null ? undefined : notebooks.length}
+          onFilterChange={list.setFilter}
+          onSortChange={list.setSort}
+        />
+      </div>
 
-      <div className={APP_CONTAINER}>
+      <div className={`${HOME_CONTAINER} animate-[fadeUp_240ms_ease-out_both]`} style={{ animationDelay: '80ms' }}>
         {/* skeleton loading */}
         {list.notebooks === null && (
-          <div className="mt-8 grid grid-cols-[repeat(auto-fill,minmax(264px,1fr))] gap-x-8 gap-y-10">
-            {Array.from({ length: 8 }, (_, i) => (
-              <div
-                key={i}
-                className="mr-2 mb-2 rounded-l-[4px] rounded-r-xl border border-[#24232c] bg-[#111016]"
-                style={{ aspectRatio: '3/4' }}
-              />
+          <div className="mt-8 flex flex-col">
+            {Array.from({ length: 6 }, (_, i) => (
+              <div key={i}>
+                <div className="h-16 rounded-lg bg-white/[0.03]" />
+                <div className="hairline my-0.5" aria-hidden />
+              </div>
             ))}
           </div>
         )}
@@ -95,9 +116,27 @@ export function NotebooksPage() {
           />
         )}
 
-        {/* grid */}
-        {list.notebooks !== null && notebooks.length > 0 && (
-          <div className="mt-8 grid grid-cols-[repeat(auto-fill,minmax(264px,1fr))] gap-x-8 gap-y-10 pb-20">
+        {/* list body */}
+        {list.notebooks !== null && notebooks.length > 0 && view === 'list' && (
+          <div className="mt-8 pb-24">
+            {notebooks.map((nb) => (
+              <NotebookRow
+                key={nb.id}
+                notebook={nb}
+                filter={list.filter}
+                onOpen={() => navigate(`/notebooks/${nb.id}`)}
+                onRename={() => dialogs.openRename(nb)}
+                onToggleFavorite={() => handleUpdate(nb, { isFavorite: !nb.is_favorite })}
+                onToggleArchive={() => handleUpdate(nb, { archived: nb.archived_at === null })}
+                onDelete={() => dialogs.openDelete(nb)}
+              />
+            ))}
+          </div>
+        )}
+
+        {/* grid body */}
+        {list.notebooks !== null && notebooks.length > 0 && view === 'grid' && (
+          <div className="mt-4 grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-3 pb-24">
             {notebooks.map((nb) => (
               <NotebookCard
                 key={nb.id}
@@ -110,20 +149,6 @@ export function NotebooksPage() {
                 onDelete={() => dialogs.openDelete(nb)}
               />
             ))}
-
-            {/* dashed "New notebook" tile */}
-            <button
-              onClick={dialogs.openCreate}
-              className="group flex flex-col items-center justify-center gap-4 rounded-xl border border-dashed border-[#24232c] transition-colors hover:border-[#3f3f46] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#7c6ee6] focus-visible:ring-offset-2 focus-visible:ring-offset-[#060608]"
-              style={{ aspectRatio: '3/4', marginRight: 8, marginBottom: 8, minHeight: 260 }}
-            >
-              <span className="flex h-10 w-10 items-center justify-center rounded-lg border border-[#24232c] text-[#a09fab]">
-                <Plus className="h-5 w-5" />
-              </span>
-              <span className="text-sm text-[#a09fab] transition-colors group-hover:text-[#f4f4f6]">
-                New notebook
-              </span>
-            </button>
           </div>
         )}
       </div>

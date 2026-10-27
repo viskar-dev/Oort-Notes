@@ -202,6 +202,24 @@ pub struct CreateDiagramArgs {
     pub side: Option<String>,
 }
 
+/// Convert the user's current selection into a flow diagram: the diagram
+/// takes the selection's place and the selected shapes are removed.
+#[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
+pub struct ConvertSelectionArgs {
+    /// Diagram title (may be empty).
+    pub title: Option<String>,
+    /// Node list; ids are edge endpoints, order shows intent.
+    pub nodes: Vec<DiagramNode>,
+    /// Directed edges; drawn as arrows between the matched nodes.
+    pub edges: Vec<DiagramEdge>,
+    /// Layout direction ('down' | 'right', default 'down').
+    pub direction: Option<String>,
+    /// External (MCP) clients' destructive confirmation: the client surfaces
+    /// the confirmation in its own UI and re-sends the call with `true`. The
+    /// in-app assistant confirms through the app card and never sends this.
+    pub confirmed: Option<bool>,
+}
+
 /// Create arbitrary tldraw shapes from partial shape objects.
 #[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
 pub struct CreateShapesArgs {

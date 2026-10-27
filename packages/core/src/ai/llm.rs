@@ -19,6 +19,7 @@ use async_openai::types::chat::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::error::CoreError;
 
@@ -37,6 +38,10 @@ const COMPLETION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1
 /// Transcript text kept per tool event for the UI (full results still go to
 /// the model, only the display shrinks).
 const EVENT_TEXT_LIMIT: usize = 4000;
+
+/// Note pushed when the user pressed Stop: the turn ends with whatever it
+/// already produced instead of silently vanishing.
+const CANCELLED_NOTE: &str = "Turn cancelled — the assistant stopped where it was.";
 
 /// Tools that change the canvas content; batches of these are announced to
 /// the frontend so it can group them into one undo entry.
@@ -438,20 +443,21 @@ pub async fn run_agent(
     history: &[HistoryMessage],
     user_message: &str,
 ) -> Result<Vec<AgentEvent>, CoreError> {
-    run_agent_with_sink(client, ctx, history, user_message, None, None).await
+    run_agent_with_sink(client, ctx, history, user_message, None, None, None).await
 }
 
-/// Same loop with a live outlet and optional per-turn context (right-click
-/// anchoring, selection). The returned list is still the authoritative
-/// complete result; the sink only provides early access. A model failure
-/// after some tools ran never discards the transcript: it becomes a system
-/// event and the turn ends with what it produced.
+/// Same loop with a live outlet, optional per-turn context (right-click
+/// anchoring, selection) and an optional Stop flag. The returned list is still
+/// the authoritative complete result; the sink only provides early access. A
+/// model failure after some tools ran never discards the transcript: it
+/// becomes a system event and the turn ends with what it produced.
 pub async fn run_agent_with_sink(
     client: &LlmClient,
     ctx: &DispatchCtx<'_>,
     history: &[HistoryMessage],
     user_message: &str,
     context: Option<&str>,
+    cancel: Option<&AtomicBool>,
     sink: Option<Box<dyn FnMut(AgentEvent) + Send>>,
 ) -> Result<Vec<AgentEvent>, CoreError> {
     let mut messages = build_request_messages(history, user_message, context);
@@ -459,6 +465,12 @@ pub async fn run_agent_with_sink(
     let chat_tools = chat_tools()?;
 
     for _step in 0..MAX_STEPS {
+        // Stop is honored between boundaries only: before the next model call
+        // and before each tool dispatch — an in-flight tool still finishes.
+        if cancel.is_some_and(|flag| flag.load(Ordering::SeqCst)) {
+            out.push(AgentEvent::note(CANCELLED_NOTE.to_string()));
+            return Ok(out.events);
+        }
         let message = match client.complete(&messages, &chat_tools).await {
             Ok(message) => message,
             Err(e) => {
@@ -524,7 +536,12 @@ pub async fn run_agent_with_sink(
             ctx.bridge.inspect(|b| b.notify(bridge::events::BEGIN));
         }
 
+        let mut cancelled_mid_batch = false;
         for call in &calls {
+            if cancel.is_some_and(|flag| flag.load(Ordering::SeqCst)) {
+                cancelled_mid_batch = true;
+                break;
+            }
             let name = call.function.name.clone();
             let args: Value = serde_json::from_str(&call.function.arguments)
                 .unwrap_or_else(|_| serde_json::json!({}));
@@ -588,6 +605,10 @@ pub async fn run_agent_with_sink(
 
         if mutating {
             ctx.bridge.inspect(|b| b.notify(bridge::events::END));
+        }
+        if cancelled_mid_batch {
+            out.push(AgentEvent::note(CANCELLED_NOTE.to_string()));
+            return Ok(out.events);
         }
     }
 
@@ -735,5 +756,35 @@ mod tests {
         assert_eq!(json["service_tier"], "flex");
         let _: CreateChatCompletionResponse =
             serde_json::from_value(json).expect("a known tier must still decode");
+    }
+
+    #[tokio::test]
+    async fn a_preset_stop_flag_ends_the_turn_before_any_model_call() {
+        use super::bridge::CallOrigin;
+        use std::sync::atomic::AtomicBool;
+
+        let flag = AtomicBool::new(true);
+        // A lazy pool never connects — and with Stop already pressed the loop
+        // returns at its first check, before the client is touched at all.
+        let pool = sqlx::pool::Pool::<sqlx::Sqlite>::connect_lazy("sqlite::memory:")
+            .expect("a lazy pool needs no server");
+        let ctx = DispatchCtx { pool: &pool, bridge: None, origin: CallOrigin::Mcp };
+        let client = LlmClient::new("http://127.0.0.1:9", "test-model", "unused");
+
+        let events = run_agent_with_sink(
+            &client,
+            &ctx,
+            &[HistoryMessage { role: "user".into(), content: "draw something".into() }],
+            "continue",
+            None,
+            Some(&flag),
+            None,
+        )
+        .await
+        .expect("a cancelled turn is not an error");
+
+        assert_eq!(events.len(), 1, "just the cancellation note");
+        assert_eq!(events[0].role, "system");
+        assert_eq!(events[0].text, CANCELLED_NOTE);
     }
 }

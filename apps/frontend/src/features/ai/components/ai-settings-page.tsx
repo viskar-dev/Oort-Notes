@@ -1,13 +1,12 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
+import { Copy, Eye, EyeOff, MoreHorizontal, RotateCcw } from 'lucide-react';
 import {
-  ChevronRight,
-  Copy,
-  Eye,
-  EyeOff,
-  Info,
-  MoreHorizontal,
-  RotateCcw,
-} from 'lucide-react';
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { SettingsLayout } from '@/components/layout/settings-layout';
 import { isTauri } from '@tauri-apps/api/core';
 import {
@@ -20,101 +19,177 @@ import {
   aiSetKey,
   type AiConnectionInfo,
 } from '@/features/ai/ai-ipc';
-import { type AiDestructivePolicy, normPolicy, useAiPolicyStore } from '@/features/ai/policy-store';
+import { normPolicy, useAiPolicyStore } from '@/features/ai/policy-store';
+import { toast } from 'sonner';
 
-/* shared input/button classes for the flat settings look:
-   inputs are the only bordered elements on the page */
 const INPUT_CLS =
   'h-9 w-full rounded-lg border border-white/[0.08] bg-white/[0.03] px-3 text-[13px] text-ink outline-none transition-colors placeholder:text-muted-foreground focus:border-primary';
 const GHOST_BTN_CLS =
-  'h-8 rounded-md px-3 text-[13px] text-[#c8c8cc] transition-colors hover:bg-white/[0.06] hover:text-ink';
+  'h-8 shrink-0 rounded-md px-3 text-[13px] text-fg-2 transition-colors hover:bg-white/[0.06] hover:text-ink';
+const PRIMARY_BTN_CLS =
+  'h-8 shrink-0 rounded-md bg-primary px-4 text-[13px] font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40';
+const ICON_BTN_CLS =
+  'flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-white/[0.06] hover:text-ink';
 
-/** Route: '/settings/ai' — desktop only (the AI features themselves run
- *  inside the local desktop app). Provider/model config in the settings
- *  table, the API key in the OS keychain:
- *  - config rows never contain the key,
- *  - the key input is write-only (type=password, never fetched back),
- *  - the MCP URL (endpoint + token) is shown and copyable; token rotation is
- *    behind the ⋯ menu. The endpoint persists across app restarts. */
+type Config = {
+  base_url: string;
+  model: string;
+  destructive_policy: string;
+};
+
+const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e));
+
+const POLICY_ITEMS: Record<string, string> = {
+  ask: 'Ask each time',
+  auto_confirm: 'Delete right away',
+};
+
+function Section({
+  title,
+  aside,
+  children,
+}: {
+  title: string;
+  aside?: ReactNode;
+  children?: ReactNode;
+}) {
+  return (
+    <section className="border-t border-white/[0.06] py-6 first:border-t-0 first:pt-0">
+      <div className="mb-3 flex min-h-8 items-center justify-between gap-3">
+        <h2 className="text-sm font-medium text-ink">{title}</h2>
+        {aside}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+function KeyInput({
+  value,
+  onChange,
+  onSubmit,
+  onCancel,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  onSubmit: () => void;
+  onCancel?: () => void;
+}) {
+  const empty = value.trim().length === 0;
+  return (
+    <div className="flex items-center gap-2">
+      <input
+        type="password"
+        value={value}
+        autoComplete="off"
+        autoFocus={Boolean(onCancel)}
+        onChange={(e) => onChange(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' && !empty) onSubmit();
+        }}
+        className={INPUT_CLS}
+        placeholder="sk-…"
+        aria-label="API key"
+      />
+      {onCancel && (
+        <button onClick={onCancel} className={GHOST_BTN_CLS}>
+          Cancel
+        </button>
+      )}
+      <button onClick={onSubmit} disabled={empty} className={PRIMARY_BTN_CLS}>
+        Store
+      </button>
+    </div>
+  );
+}
+
 export function AiSettingsPage() {
-  const [config, setConfig] = useState<{
-    base_url: string;
-    model: string;
-    destructive_policy: string;
-  } | null>(null);
+  const tauri = isTauri();
+  const [config, setConfig] = useState<Config | null>(null);
+  const [savedConfig, setSavedConfig] = useState<Config | null>(null);
   const [hasKey, setHasKey] = useState(false);
   const [keyDraft, setKeyDraft] = useState('');
+  const [replacing, setReplacing] = useState(false);
   const [mcp, setMcp] = useState<AiConnectionInfo | null>(null);
-  const [tokenRotated, setTokenRotated] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [status, setStatus] = useState<string | null>(null);
-  /** UI-only locals for the flat look: token reveal, replace-key input,
-   *  remote-setup expander and the ⋯ menu. */
+  const [saving, setSaving] = useState(false);
   const [tokenRevealed, setTokenRevealed] = useState(false);
-  const [keyInputOpen, setKeyInputOpen] = useState(false);
-  const [remoteOpen, setRemoteOpen] = useState(false);
-  const [mcpMenuOpen, setMcpMenuOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
 
-  /** The one URL hosted connectors (and readers of this panel) need: the
-   *  endpoint path plus the token, which the wizard cannot send in a
-   *  header. Rotating the token changes every URL below. */
-  const mcpUrl = mcp
-    ? `http://127.0.0.1:${mcp.port}/mcp?access_token=${mcp.token}`
-    : '';
+  const mcpUrl = mcp ? `http://127.0.0.1:${mcp.port}/mcp?access_token=${mcp.token}` : '';
   const mcpUrlMasked = mcp
     ? `http://127.0.0.1:${mcp.port}/mcp?access_token=••••••••••••`
     : '';
 
+  const dirty =
+    config !== null &&
+    savedConfig !== null &&
+    (config.base_url !== savedConfig.base_url ||
+      config.model !== savedConfig.model ||
+      config.destructive_policy !== savedConfig.destructive_policy);
+
+  const canvasName = mcp?.active_canvas?.name;
+  const status = !mcp
+    ? { dot: 'bg-destructive', text: 'Not running' }
+    : canvasName
+      ? { dot: 'bg-ok', text: canvasName }
+      : { dot: 'bg-amber-500', text: 'No canvas open' };
+
   useEffect(() => {
-    if (!isTauri()) return;
+    if (!tauri) return;
     let cancelled = false;
     void (async () => {
       try {
         const [cfg, keyHit, mcpInfo] = await Promise.all([aiGetConfig(), aiHasKey(), aiMcpInfo()]);
         if (cancelled) return;
-        setConfig({ ...cfg, destructive_policy: normPolicy(cfg.destructive_policy) });
+        const loaded = { ...cfg, destructive_policy: normPolicy(cfg.destructive_policy) };
+        setConfig(loaded);
+        setSavedConfig(loaded);
         setHasKey(keyHit);
         setMcp(mcpInfo);
-        // Keep the live executors in sync with the stored policy.
-        useAiPolicyStore.getState().set(normPolicy(cfg.destructive_policy));
+        useAiPolicyStore.getState().set(loaded.destructive_policy);
       } catch (e) {
-        if (!cancelled) setError(e instanceof Error ? e.message : String(e));
+        if (!cancelled) setError(errMsg(e));
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, []);
-
-  function flash(message: string) {
-    setStatus(message);
-    setTimeout(() => setStatus((current) => (current === message ? null : current)), 2500);
-  }
+  }, [tauri]);
 
   async function saveConfig() {
     if (!config) return;
-    const policy = normPolicy(config.destructive_policy);
+    const destructivePolicy = normPolicy(config.destructive_policy);
+    const next: Config = {
+      base_url: config.base_url.trim(),
+      model: config.model.trim(),
+      destructive_policy: destructivePolicy,
+    };
+    setSaving(true);
     try {
-      await aiSetConfig(config.base_url.trim(), config.model.trim(), policy);
-      // No remount happens after a save; the live store carries it into the
-      // running canvas executors immediately.
-      useAiPolicyStore.getState().set(policy);
-      flash('Saved');
+      await aiSetConfig(next.base_url, next.model, destructivePolicy);
+      useAiPolicyStore.getState().set(destructivePolicy);
+      setConfig(next);
+      setSavedConfig(next);
+      toast.success('Saved');
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      toast.error('Could not save', { description: errMsg(e) });
+    } finally {
+      setSaving(false);
     }
   }
 
   async function saveKey() {
-    if (keyDraft.trim().length === 0) return;
+    const key = keyDraft.trim();
+    if (!key) return;
     try {
-      await aiSetKey(keyDraft.trim());
+      await aiSetKey(key);
       setKeyDraft('');
       setHasKey(true);
-      setKeyInputOpen(false);
-      flash('API key stored in the keychain');
+      setReplacing(false);
+      toast.success('API key stored');
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      toast.error('Could not store the key', { description: errMsg(e) });
     }
   }
 
@@ -122,67 +197,58 @@ export function AiSettingsPage() {
     try {
       await aiClearKey();
       setHasKey(false);
-      flash('API key removed');
+      toast.success('API key removed');
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      toast.error('Could not remove the key', { description: errMsg(e) });
     }
   }
 
-  async function copy(text: string, message: string) {
+  async function copyUrl() {
     try {
-      await navigator.clipboard.writeText(text);
-      flash(message);
+      await navigator.clipboard.writeText(mcpUrl);
+      toast.success('Copied');
     } catch {
-      flash('Copy blocked — select the URL text instead');
+      toast.error('Copy blocked');
     }
   }
 
   async function rotateToken() {
     try {
-      const info = await aiRotateMcpToken();
-      setMcp(info);
-      setTokenRotated(true);
-      setMcpMenuOpen(false);
-      flash('New MCP token generated');
+      setMcp(await aiRotateMcpToken());
+      setMenuOpen(false);
+      toast.success('New token generated', {
+        description: 'Update any connector using the old URL.',
+      });
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      toast.error('Could not rotate the token', { description: errMsg(e) });
     }
   }
 
-  /** Re-read the connection info — mainly to refresh the canvas-pin status
-   *  after opening or leaving a canvas while this page is up. */
   async function refreshMcp() {
     try {
       setMcp(await aiMcpInfo());
-      flash('Status refreshed');
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      toast.error('Could not refresh', { description: errMsg(e) });
     }
   }
 
   return (
     <SettingsLayout section="ai">
-      {!isTauri() ? (
-        <div className="max-w-[640px]">
-          <h1 className="text-xl font-semibold text-ink">AI</h1>
-          <p className="mt-8 max-w-[640px] text-[13px] text-muted-foreground">
-            The AI assistant runs inside the Oort desktop app. Open AI settings in the desktop
-            build to configure it.
-          </p>
-        </div>
-      ) : (
-        <div className="max-w-[640px] pb-16">
-          <h1 className="text-xl font-semibold text-ink">AI</h1>
+      <div className="max-w-[640px] pb-16">
+        <h1 className="text-xl font-semibold text-ink">AI</h1>
 
+        {!tauri ? (
+          <p className="mt-8 text-[13px] text-muted-foreground">
+            Available in the desktop app.
+          </p>
+        ) : (
           <div className="mt-8">
-            {/* ── Section 1 · Model provider ─────────────────────────── */}
-            <section>
-              <h2 className="text-sm font-medium text-ink">Model provider</h2>
+            <Section title="Model provider">
               {config === null ? (
-                <p className="mt-3 text-[13px] text-muted-foreground">Loading…</p>
+                <p className="text-[13px] text-muted-foreground">Loading…</p>
               ) : (
                 <>
-                  <div className="mt-3 grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-[3fr_2fr] gap-3">
                     <label className="flex flex-col gap-1.5">
                       <span className="text-xs text-muted-foreground">Base URL</span>
                       <input
@@ -202,276 +268,163 @@ export function AiSettingsPage() {
                       />
                     </label>
                   </div>
-                  <div className="mt-4 grid grid-cols-2 gap-3">
-                    <label className="flex flex-col gap-1.5">
-                      <span className="text-xs text-muted-foreground">
-                        Destructive tools (MCP clients)
-                      </span>
-                      <select
-                        value={config.destructive_policy}
-                        onChange={(e) =>
-                          setConfig({ ...config, destructive_policy: e.target.value })
-                        }
-                        className={INPUT_CLS}
-                      >
-                        <option value="ask" className="bg-[#111016]">
-                          Ask in the client each time
-                        </option>
-                        <option value="auto_confirm" className="bg-[#111016]">
-                          Delete right away
-                        </option>
-                      </select>
+
+                  <div className="mt-4 flex items-center justify-between gap-6">
+                    <label htmlFor="ai-destructive-policy" className="text-[13px] text-ink">
+                      MCP deletions
                     </label>
-                    <div />
+                    <div className="w-56 shrink-0">
+                      <Select
+                        value={config.destructive_policy}
+                        onValueChange={(v) => {
+                          if (v) setConfig({ ...config, destructive_policy: String(v) });
+                        }}
+                        items={POLICY_ITEMS}
+                      >
+                        <SelectTrigger id="ai-destructive-policy" className="w-full">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {Object.entries(POLICY_ITEMS).map(([value, label]) => (
+                            <SelectItem key={value} value={value} label={label}>
+                              {label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
                   </div>
-                  {/* no “Test connection”: the current UI has no such control
-                      and inventing a stub is out of scope */}
-                  <div className="mt-4 flex items-center gap-2">
+
+                  <div className="mt-5 flex justify-end">
                     <button
                       onClick={() => void saveConfig()}
-                      className="h-8 rounded-md bg-primary px-4 text-[13px] font-medium text-primary-foreground transition-opacity hover:opacity-90"
+                      disabled={!dirty || saving}
+                      className={PRIMARY_BTN_CLS}
                     >
                       Save
                     </button>
-                    <span className="text-xs text-muted-foreground">
-                      Applies to external MCP clients. The in-app assistant
-                      always confirms before deleting.
-                    </span>
                   </div>
                 </>
               )}
-            </section>
+            </Section>
 
-            <hr className="my-5 h-px border-0 bg-white/[0.06]" />
-
-            {/* ── Section 2 · API key ────────────────────────────────── */}
-            <section>
-              <div className="flex items-center gap-1.5">
-                <h2 className="text-sm font-medium text-ink">API key</h2>
-                <span
-                  title="Never shown again, never logged, never sent anywhere except the configured provider."
-                  className="inline-flex h-4 w-4 items-center justify-center rounded-full text-muted-foreground hover:text-ink"
-                  aria-label="Never shown again, never logged, never sent anywhere except the configured provider."
-                  role="note"
-                >
-                  <Info className="h-3.5 w-3.5" strokeWidth={1.5} />
-                </span>
-              </div>
-              <p className="mt-3 text-[13px] text-muted-foreground">Stored in your OS keychain.</p>
-
-              {hasKey ? (
-                <div className="mt-3 flex items-center">
-                  <span
+            <Section title="API key">
+              {hasKey && !replacing ? (
+                <div className="flex items-center gap-2">
+                  <div
                     aria-label="API key is stored"
-                    className="select-none font-mono text-xs tracking-[3px] text-muted-foreground"
+                    className="flex h-9 min-w-0 flex-1 select-none items-center rounded-lg border border-white/[0.08] bg-white/[0.03] px-3 font-mono text-xs tracking-[3px] text-muted-foreground"
                   >
                     ••••••••••••
-                  </span>
-                  <span className="ml-4 flex items-center gap-2 text-[13px] text-muted-foreground">
-                    <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-500" />
-                    Stored
-                  </span>
-                  <div className="ml-auto flex items-center gap-1">
-                    <button onClick={() => setKeyInputOpen((open) => !open)} className={GHOST_BTN_CLS}>
-                      {keyInputOpen ? 'Cancel' : 'Replace'}
-                    </button>
-                    <button
-                      onClick={() => void clearKey()}
-                      className="h-8 rounded-md px-3 text-[13px] text-red-400/80 transition-colors hover:bg-white/[0.06] hover:text-red-300"
-                    >
-                      Remove
-                    </button>
                   </div>
+                  <button onClick={() => setReplacing(true)} className={GHOST_BTN_CLS}>
+                    Replace
+                  </button>
+                  <button
+                    onClick={() => void clearKey()}
+                    className="h-8 shrink-0 rounded-md px-3 text-[13px] text-destructive transition-colors hover:bg-white/[0.06]"
+                  >
+                    Remove
+                  </button>
                 </div>
               ) : (
-                /* no key yet: the input flow shows directly (same as before) */
-                <div className="mt-3 flex items-center gap-2">
-                  <input
-                    type="password"
-                    value={keyDraft}
-                    autoComplete="off"
-                    onChange={(e) => setKeyDraft(e.target.value)}
-                    className={INPUT_CLS}
-                    placeholder="sk-…"
-                    aria-label="New key"
-                  />
-                  <button
-                    onClick={() => void saveKey()}
-                    disabled={keyDraft.trim().length === 0}
-                    className="h-8 shrink-0 rounded-md bg-primary px-4 text-[13px] font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-40"
-                  >
-                    Store
-                  </button>
-                </div>
+                <KeyInput
+                  value={keyDraft}
+                  onChange={setKeyDraft}
+                  onSubmit={() => void saveKey()}
+                  onCancel={
+                    hasKey
+                      ? () => {
+                          setKeyDraft('');
+                          setReplacing(false);
+                        }
+                      : undefined
+                  }
+                />
               )}
+            </Section>
 
-              {hasKey && keyInputOpen && (
-                /* Replace flow: same storeKey handler, entered from Replace */
-                <div className="mt-3 flex items-center gap-2">
-                  <input
-                    type="password"
-                    value={keyDraft}
-                    autoComplete="off"
-                    autoFocus
-                    onChange={(e) => setKeyDraft(e.target.value)}
-                    className={INPUT_CLS}
-                    placeholder="sk-…"
-                    aria-label="New key"
-                  />
-                  <button
-                    onClick={() => void saveKey()}
-                    disabled={keyDraft.trim().length === 0}
-                    className="h-8 shrink-0 rounded-md bg-primary px-4 text-[13px] font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-40"
-                  >
-                    Store
-                  </button>
-                </div>
-              )}
-            </section>
-
-            <hr className="my-5 h-px border-0 bg-white/[0.06]" />
-
-            {/* ── Section 3 · MCP server ─────────────────────────────── */}
-            <section>
-              <div className="flex items-center">
-                <h2 className="text-sm font-medium text-ink">MCP server</h2>
-                <div className="ml-auto flex items-center gap-1">
-                  {mcp && mcp.active_canvas ? (
-                    <span className="flex items-center gap-2 text-[13px] text-muted-foreground">
-                      <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-500" />
-                      {`Canvas open: “${mcp.active_canvas.name}”`}
-                    </span>
-                  ) : mcp ? (
-                    <span
-                      title="No canvas is open in the desktop app — canvas tools (get_canvas, notes, diagrams…) fail until you open a chapter page here."
-                      className="flex items-center gap-2 text-[13px] text-muted-foreground"
-                    >
-                      <span className="inline-block h-1.5 w-1.5 rounded-full bg-red-500" />
-                      No canvas open
-                    </span>
-                  ) : (
-                    <span
-                      title="Not running — it starts with the app; reopen Oort if this stays empty."
-                      className="flex items-center gap-2 text-[13px] text-muted-foreground"
-                    >
-                      <span className="inline-block h-1.5 w-1.5 rounded-full bg-red-500" />
-                      Not running
-                    </span>
-                  )}
+            <Section
+              title="MCP server"
+              aside={
+                <div className="flex items-center gap-1">
+                  <span className="flex min-w-0 items-center gap-2 text-[13px] text-muted-foreground">
+                    <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${status.dot}`} />
+                    <span className="max-w-[220px] truncate">{status.text}</span>
+                  </span>
                   <button
                     onClick={() => void refreshMcp()}
-                    title="Re-check the canvas pin and token"
+                    title="Refresh"
                     aria-label="Refresh MCP status"
-                    className="flex h-8 w-8 items-center justify-center rounded-md text-[#c8c8cc] transition-colors hover:bg-white/[0.06] hover:text-ink"
+                    className="flex h-8 w-8 items-center justify-center rounded-md text-fg-2 transition-colors hover:bg-white/[0.06] hover:text-ink"
                   >
                     <RotateCcw className="h-3.5 w-3.5" strokeWidth={1.5} />
                   </button>
                 </div>
-              </div>
-
-              {mcp ? (
-                <>
-                  {/* url field: reveal / copy / ⋯ live inside the field, no
-                      dividers; the ⋯ holds the existing New token action */}
-                  <div className="relative mt-3" onMouseLeave={() => setMcpMenuOpen(false)}>
-                    <input
-                      aria-label="MCP URL"
-                      readOnly
-                      value={tokenRevealed ? mcpUrl : mcpUrlMasked}
-                      onFocus={(e) => e.currentTarget.select()}
-                      className={`${INPUT_CLS} pr-[104px] font-mono text-xs`}
-                    />
-                    <div className="absolute right-1.5 top-1/2 flex -translate-y-1/2 items-center">
-                      <button
-                        title={tokenRevealed ? 'Hide token' : 'Reveal token'}
-                        aria-label={tokenRevealed ? 'Hide token' : 'Reveal token'}
-                        onClick={() => setTokenRevealed((r) => !r)}
-                        className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-white/[0.06] hover:text-ink"
-                      >
-                        {tokenRevealed ? (
-                          <EyeOff className="h-3.5 w-3.5" strokeWidth={1.5} />
-                        ) : (
-                          <Eye className="h-3.5 w-3.5" strokeWidth={1.5} />
-                        )}
-                      </button>
-                      <button
-                        title="Copy MCP URL"
-                        aria-label="Copy MCP URL"
-                        onClick={() => void copy(mcpUrl, 'MCP URL copied')}
-                        className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-white/[0.06] hover:text-ink"
-                      >
-                        <Copy className="h-3.5 w-3.5" strokeWidth={1.5} />
-                      </button>
-                      <button
-                        title="More actions"
-                        aria-label="More MCP actions"
-                        aria-expanded={mcpMenuOpen}
-                        onClick={() => setMcpMenuOpen((open) => !open)}
-                        className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-white/[0.06] hover:text-ink"
-                      >
-                        <MoreHorizontal className="h-4 w-4" strokeWidth={1.5} />
-                      </button>
-                      {mcpMenuOpen && (
-                        <div className="absolute right-0 top-8 z-10 rounded-lg border border-white/[0.08] bg-raised py-1 shadow-[0_4px_16px_rgba(0,0,0,0.4)]">
-                          <button
-                            title="Generate a new token (invalidates every URL with the old one)"
-                            onClick={() => void rotateToken()}
-                            className="flex h-8 w-full items-center whitespace-nowrap rounded-md px-3 text-[13px] text-[#c8c8cc] transition-colors hover:bg-white/[0.06] hover:text-ink"
-                          >
-                            New token
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  {tokenRotated && (
-                    <p className="mt-3 text-[13px] text-red-300/90">
-                      Token rotated — update every connector (ChatGPT, Claude, editors) with the
-                      URL shown above; URLs and configs with the old token no longer work.
-                    </p>
-                  )}
-
-                  {/* remote setup: collapsed one-liner expander, dynamic port */}
-                  <div className="mt-3">
+              }
+            >
+              {mcp && (
+                <div className="relative" onMouseLeave={() => setMenuOpen(false)}>
+                  <input
+                    aria-label="MCP URL"
+                    readOnly
+                    value={tokenRevealed ? mcpUrl : mcpUrlMasked}
+                    onFocus={(e) => e.currentTarget.select()}
+                    className={`${INPUT_CLS} pr-[104px] font-mono text-xs`}
+                  />
+                  <div className="absolute right-1.5 top-1/2 flex -translate-y-1/2 items-center">
                     <button
-                      onClick={() => setRemoteOpen((open) => !open)}
-                      aria-expanded={remoteOpen}
-                      className="-ml-3 flex h-8 items-center gap-1 rounded-md px-3 text-[13px] text-muted-foreground transition-colors hover:bg-white/[0.06] hover:text-ink"
+                      title={tokenRevealed ? 'Hide' : 'Reveal'}
+                      aria-label={tokenRevealed ? 'Hide token' : 'Reveal token'}
+                      onClick={() => setTokenRevealed((r) => !r)}
+                      className={ICON_BTN_CLS}
                     >
-                      <ChevronRight
-                        className={`h-3 w-3 transition-transform ${remoteOpen ? 'rotate-90' : ''}`}
-                        strokeWidth={1.5}
-                      />
-                      Remote setup
+                      {tokenRevealed ? (
+                        <EyeOff className="h-3.5 w-3.5" strokeWidth={1.5} />
+                      ) : (
+                        <Eye className="h-3.5 w-3.5" strokeWidth={1.5} />
+                      )}
                     </button>
-                    {remoteOpen && (
-                      <p className="mt-1 text-[13px] text-muted-foreground">
-                        Run <code className="text-ink">ngrok http {mcp.port}</code>, then replace{' '}
-                        <code className="text-ink">127.0.0.1:{mcp.port}</code> in the URL with your
-                        tunnel domain.
-                      </p>
+                    <button
+                      title="Copy"
+                      aria-label="Copy MCP URL"
+                      onClick={() => void copyUrl()}
+                      className={ICON_BTN_CLS}
+                    >
+                      <Copy className="h-3.5 w-3.5" strokeWidth={1.5} />
+                    </button>
+                    <button
+                      title="More"
+                      aria-label="More MCP actions"
+                      aria-expanded={menuOpen}
+                      onClick={() => setMenuOpen((open) => !open)}
+                      className={ICON_BTN_CLS}
+                    >
+                      <MoreHorizontal className="h-4 w-4" strokeWidth={1.5} />
+                    </button>
+                    {menuOpen && (
+                      <div className="absolute right-0 top-8 z-10 rounded-lg border border-white/[0.08] bg-raised py-1 shadow-[0_4px_16px_rgba(0,0,0,0.4)]">
+                        <button
+                          onClick={() => void rotateToken()}
+                          className="flex h-8 w-full items-center whitespace-nowrap rounded-md px-3 text-[13px] text-fg-2 transition-colors hover:bg-white/[0.06] hover:text-ink"
+                        >
+                          New token
+                        </button>
+                      </div>
                     )}
                   </div>
-                </>
-              ) : (
-                <p className="mt-3 text-[13px] text-muted-foreground">
-                  It starts with the app; reopen Oort if this stays empty.
-                </p>
+                </div>
               )}
-            </section>
+            </Section>
           </div>
-        </div>
-      )}
+        )}
 
-      {status && (
-        <div className="mt-4 rounded-lg bg-emerald-950/70 px-3 py-2 text-[13px] text-emerald-300">
-          {status}
-        </div>
-      )}
-      {error && (
-        <div className="mt-4 rounded-lg bg-red-950/80 px-3 py-2 text-[13px] text-red-300">{error}</div>
-      )}
+        {error && (
+          <div className="mt-4 rounded-lg bg-destructive/10 px-3 py-2 text-[13px] text-destructive">
+            {error}
+          </div>
+        )}
+      </div>
     </SettingsLayout>
   );
 }

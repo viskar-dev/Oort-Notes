@@ -1,8 +1,13 @@
 import { describe, expect, it, vi } from 'vitest';
 import { executeAiTool, type AiExecutorDeps } from './executors';
+import { ghostConfig } from './ghost-store';
 import { useViewModeStore } from '@/stores/view-mode-store';
 import { useAiConfirmStore } from './confirm-store';
 import { useAiPolicyStore } from './policy-store';
+
+// The executor's ghost-glow dwell is a screen-beat, not logic: skip it here
+// so the placement tests keep running fast.
+ghostConfig.dwellMs = 0;
 
 /** executors only needs the handful of editor methods its filters touch. */
 function makeEditor(): AiExecutorDeps['editor'] {
@@ -12,6 +17,23 @@ function makeEditor(): AiExecutorDeps['editor'] {
     getCurrentPageShapeIds: vi.fn(() => new Set()),
     getShape: vi.fn(() => null),
   } as unknown as AiExecutorDeps['editor'];
+}
+
+/** Recorded createShape calls. The editor is cast to the real `Editor`
+ *  type, so the spy's `.mock` must be read through a narrow cast here. */
+function createShapeCalls(editor: AiExecutorDeps['editor']): Array<{
+  type?: string;
+  x?: number;
+  y?: number;
+  props: { scale?: number; autoSize?: boolean } & Record<string, unknown>;
+}> {
+  return (
+    editor.createShape as unknown as {
+      mock: {
+        calls: Array<[{ type?: string; x?: number; y?: number; props: { scale?: number; autoSize?: boolean } & Record<string, unknown> }]>;
+      };
+    }
+  ).mock.calls.map((call) => call[0]);
 }
 
 function deps(): AiExecutorDeps {
@@ -61,7 +83,7 @@ describe('executeAiTool routing', () => {
     const { editor, deps: d } = placedDeps();
     const value = await executeAiTool(d, 'create_text', { text: 'Optics', heading: true });
     expect((value.created as string).startsWith('shape:')).toBe(true);
-    const created = editor.createShape.mock.calls[0][0];
+    const created = createShapeCalls(editor)[0];
     expect(created.type).toBe('text');
     expect(created.props.scale).toBe(2);
     expect(created.props.autoSize).toBe(true);
@@ -306,7 +328,7 @@ describe('executeAiTool routing', () => {
     await executeAiTool(d, 'create_shapes', { shapes: [{ type: 'text' }, { type: 'text' }] });
     // Batch anchor: content right edge + gap, aligned with content top —
     // both planned shapes share the column x; offsets keep their order.
-    const codes = editor.createShape.mock.calls.map((c) => ({ x: c[0].x, y: c[0].y }));
+    const codes = createShapeCalls(editor).map((c) => ({ x: c.x, y: c.y }));
     expect(codes).toHaveLength(2);
     expect(codes[0]).toEqual({ x: expect.closeTo(80, 0), y: expect.closeTo(272, 0) });
     expect(codes[1]).toEqual({ x: expect.closeTo(80, 0), y: expect.closeTo(386, 0) });
@@ -320,7 +342,7 @@ describe('executeAiTool routing', () => {
       shapes: [{ type: 'geo', x: -77, y: 1234, props: { w: 10, h: 10 } }],
     });
     expect(result.created).toHaveLength(1);
-    expect(editor.createShape.mock.calls[0][0]).toMatchObject({ x: -77, y: 1234 });
+    expect(createShapeCalls(editor)[0]).toMatchObject({ x: -77, y: 1234 });
     // Explicit positions are never clamped or moved: no region read at all.
     expect(editor.getViewportPageBounds).not.toHaveBeenCalled();
   });
@@ -333,7 +355,7 @@ describe('executeAiTool routing', () => {
         { type: 'text' },
       ],
     });
-    const calls = editor.createShape.mock.calls.map((c) => ({ type: c[0].type, x: c[0].x, y: c[0].y }));
+    const calls = createShapeCalls(editor).map((c) => ({ type: c.type, x: c.x, y: c.y }));
     expect(calls[0]).toMatchObject({ type: 'geo', x: 500, y: 900 });
     expect(calls[1]).toMatchObject({ type: 'text' });
     expect(calls[1].x).not.toBe(0);
@@ -345,7 +367,7 @@ describe('executeAiTool routing', () => {
       shapes: [{ type: 'text' }, { type: 'geo', x: 0, y: 0, props: { w: 1, h: 1 } }],
       side: 'right',
     });
-    const text = editor.createShape.mock.calls[0][0];
+    const text = createShapeCalls(editor)[0];
     // content.x + content.w + LAYOUT_GAP = 372, vertically on content top.
     expect(text.x).toBeCloseTo(372, 0);
     expect(text.y).toBeCloseTo(100, 0);
@@ -376,7 +398,13 @@ describe('executeAiTool routing', () => {
   // -----------------------------------------------------------------
 
   /** Pages capability: two topics, first one active with two sheets. */
-  function pagesDeps(overrides: Partial<Parameters<typeof addPageCapability>[0]> = {}): {
+  function pagesDeps(
+    overrides: Partial<{
+      active_topic_id: string;
+      topics: Array<{ id: string; name: string; page_count?: number }>;
+      addPage: (topicId: string) => Promise<{ id: string; name: string; index: number }>;
+    }> = {},
+  ): {
     deps: AiExecutorDeps;
     addPage: ReturnType<typeof vi.fn>;
   } {
@@ -403,10 +431,6 @@ describe('executeAiTool routing', () => {
       pages: () => capability,
     };
     return { deps: d, addPage };
-  }
-
-  function addPageCapability() {
-    return { active_topic_id: '', topics: [] as Array<{ id: string; name: string }>, addPage: async () => ({ id: '', name: '', index: 0 }) };
   }
 
   it('add_page asks the caller which topic via requires_input (no desktop UI)', async () => {
@@ -454,5 +478,116 @@ describe('executeAiTool routing', () => {
     await expect(executeAiTool(deps(), 'add_page', { topic_id: 't1' })).rejects.toThrow(
       'page-type canvases only',
     );
+  });
+});
+
+describe('convert_selection', () => {
+  const DIAGRAM_ARGS = {
+    nodes: [
+      { id: 'n1', label: 'Light in' },
+      { id: 'n2', label: 'Refract' },
+    ],
+    edges: [{ from: 'n1', to: 'n2', label: 'bends' }],
+  };
+
+  /** Selection of one shape at (40, 12) whose content the model turned into
+   *  DIAGRAM_ARGS; diagram creation runs against the same minimal mock the
+   *  create_diagram path needs (no planning — x/y are pinned by the tool). */
+  function convertDeps(approves: (title: string) => boolean = () => true): {
+    deps: AiExecutorDeps;
+    editor: AiExecutorDeps['editor'];
+    confirmCalls: string[];
+  } {
+    const confirmCalls: string[] = [];
+    const confirm = async (title: string, _detail: string) => {
+      confirmCalls.push(title);
+      return approves(title);
+    };
+    const editor = {
+      ...makeEditor(),
+      getSelectedShapeIds: vi.fn(() => ['shape:a']),
+      getShape: vi.fn(() => ({ id: 'shape:a' })),
+      getShapePageBounds: vi.fn(() => ({ x: 200, y: 300, w: 120, h: 60, minX: 200, minY: 300, maxX: 320, maxY: 360 })),
+      getViewportPageBounds: vi.fn(() => ({ x: 0, y: 0, w: 1600, h: 1000 })),
+      createShape: vi.fn(),
+      createBinding: vi.fn(),
+      getBindingsFromShape: vi.fn(() => []),
+      deleteShapes: vi.fn(),
+    } as unknown as AiExecutorDeps['editor'];
+    return { deps: { ...deps(), editor, confirm }, editor, confirmCalls };
+  }
+
+  // The confirm card precedes everything: convert deletes user content.
+  it('asks before swapping the selection for a diagram', async () => {
+    useAiPolicyStore.setState({ policy: 'ask' });
+    const { deps: d, editor, confirmCalls } = convertDeps();
+    const value = await executeAiTool(d, 'convert_selection', DIAGRAM_ARGS);
+    expect(confirmCalls).toHaveLength(1);
+    expect(confirmCalls[0]).toBe('Convert selection?');
+    expect((value as Record<string, unknown> & { deleted: string[] }).deleted).toEqual(['shape:a']);
+    // The diagram took the selection's top-left, not a planned slot.
+    expect((value as Record<string, unknown> & { x: number }).x).toBe(200);
+    expect((value as Record<string, unknown> & { y: number }).y).toBe(300);
+    expect(editor.deleteShapes).toHaveBeenCalledTimes(1);
+  });
+
+  it('declines the card and nothing is touched', async () => {
+    const { deps: d, editor } = convertDeps(() => false);
+    await expect(executeAiTool(d, 'convert_selection', DIAGRAM_ARGS)).rejects.toThrow(
+      'cancelled by the user',
+    );
+    expect(editor.deleteShapes).not.toHaveBeenCalled();
+    expect(editor.createShape).not.toHaveBeenCalled();
+  });
+
+  it('fails cleanly when nothing is selected', async () => {
+    const { deps: d } = convertDeps();
+    const empty = { ...d.editor as object, getSelectedShapeIds: () => [] } as unknown as AiExecutorDeps['editor'];
+    await expect(executeAiTool({ ...d, editor: empty }, 'convert_selection', DIAGRAM_ARGS)).rejects.toThrow(
+      'nothing is selected',
+    );
+  });
+
+  it('mcp convert returns requires_confirmation without any desktop UI', async () => {
+    const confirmSpy = vi.fn();
+    useAiConfirmStore.setState({ requestConfirm: confirmSpy });
+    const { deps: d, editor } = convertDeps();
+    const pending = await executeAiTool(
+      { ...d, editor, origin: 'mcp' },
+      'convert_selection',
+      DIAGRAM_ARGS,
+    );
+    expect((pending as Record<string, unknown> & { status?: string }).status).toBe('requires_confirmation');
+    expect(String(pending.prompt as string)).toContain('"confirmed": true');
+    expect(confirmSpy).not.toHaveBeenCalled();
+    expect(editor.deleteShapes).not.toHaveBeenCalled();
+  });
+
+  it('mcp convert with confirmed deletes and replaces', async () => {
+    useAiPolicyStore.setState({ policy: 'ask' });
+    const confirmSpy = vi.fn();
+    useAiConfirmStore.setState({ requestConfirm: confirmSpy });
+    const { deps: d, editor } = convertDeps();
+    const value = await executeAiTool(
+      { ...d, editor, origin: 'mcp' },
+      'convert_selection',
+      { ...DIAGRAM_ARGS, confirmed: true },
+    );
+    expect((value as Record<string, unknown> & { deleted: string[] }).deleted).toEqual(['shape:a']);
+    expect(confirmSpy).not.toHaveBeenCalled();
+    expect(editor.deleteShapes).toHaveBeenCalledTimes(1);
+  });
+
+  it('mcp auto-converts under the auto_confirm policy', async () => {
+    useAiPolicyStore.setState({ policy: 'auto_confirm' });
+    const { deps: d, editor } = convertDeps();
+    const value = await executeAiTool(
+      { ...d, editor, origin: 'mcp' },
+      'convert_selection',
+      DIAGRAM_ARGS,
+    );
+    expect(String((value as { status?: string }).status ?? '')).toBe('');
+    expect((value as Record<string, unknown> & { deleted: string[] }).deleted).toEqual(['shape:a']);
+    expect(editor.deleteShapes).toHaveBeenCalledTimes(1);
   });
 });

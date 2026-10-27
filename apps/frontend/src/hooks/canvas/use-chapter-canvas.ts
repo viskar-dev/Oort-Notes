@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { getSnapshot, loadSnapshot, type Editor, type TLCamera, type TLPageId, type TLShape, type TLUnknownShape } from 'tldraw';
 import { api, type Chapter, type Topic, type TopicPage } from '@/lib/ipc';
+import { toast } from 'sonner';
 
 // tldraw page ids are 'page:<uuid>'; in both chapter modes the uuid is the
 // topic's own id (a 'page' chapter topic is a PDF-style stack of sheet
@@ -261,7 +262,10 @@ export function useChapterCanvas(
 
       for (const t of current) {
         if (!seen.has(t.id)) {
-          api.deleteTopic(t.id).catch((e) => console.error('topic delete failed', e));
+          api.deleteTopic(t.id).catch((e) => {
+            console.error('topic delete failed', e);
+            toast.error('Topic delete failed', { description: `${t.name}: ${e instanceof Error ? e.message : String(e)}` });
+          });
         }
       }
 
@@ -705,7 +709,6 @@ export function useChapterCanvas(
         const syncFromCamera = () => {
           const count = activePagesRef.current.length;
           if (count === 0) return;
-          const cam = editor.getCamera();
           const vp = editor.getViewportScreenBounds();
           const centerY = editor.screenToPage({ x: vp.x + vp.w / 2, y: vp.y + vp.h / 2 }).y;
           const stepY = (chapter.page_height ?? 0) + SHEET_GAP;
@@ -834,7 +837,13 @@ export function useChapterCanvas(
       const editor = editorRef.current;
       // tldraw refuses to delete the last remaining page
       if (!editor || editor.getPages().length <= 1) return;
-      api.deleteTopic(topic.id).catch((e) => console.error('topic delete failed', e));
+      api
+        .deleteTopic(topic.id)
+        .then(() => toast.success('Topic deleted', { description: topic.name }))
+        .catch((e) => {
+          console.error('topic delete failed', e);
+          toast.error('Topic delete failed', { description: e instanceof Error ? e.message : String(e) });
+        });
       editor.deletePage(topicIdToPageId(topic.id));
     },
     [],

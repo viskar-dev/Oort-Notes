@@ -130,6 +130,11 @@ pub fn all_tools() -> Vec<ToolDef> {
             a::CreateDiagramArgs, false, false, frontend
         ),
         def!(
+            "convert_selection",
+            "Convert the shapes the user currently has selected into a node/arrow flow diagram (same nodes/edges as create_diagram): read the selection first (get_selection, or the anchor context of the request), design nodes and edges from its content, then call this. The diagram is placed at the selection's top-left and the selected shapes are deleted once it exists — the content is reshaped, not lost; wordy prose becomes a clean diagram. Fails when nothing is selected. Destructive: over MCP an unconfirmed call returns {\"status\": \"requires_confirmation\", ...} — surface it in the client UI and re-send with \"confirmed\": true; in the app the user confirms in the confirmation card.",
+            a::ConvertSelectionArgs, true, false, frontend
+        ),
+        def!(
             "create_shapes",
             "Create one or more basic tldraw shapes from partial shape objects ({\"type\": \"geo\"|\"text\"|\"note\"|\"arrow\"|\"line\"|\"frame\"|\"svg-diagram\", \"x\":, \"y\":, \"props\": {...}}); geo shapes need props with numeric w and h. Entries without x/y are placed deterministically below existing content (use \"side\" for left/right/above) and clamped inside the open page sheet — never pass x/y you did not measure. Entries with explicit x/y are honored exactly. Best for plain geometry and for frames that contain later blocks. Use the dedicated create_* tools for code, math, tables and cards.",
             a::CreateShapesArgs, false, false, frontend

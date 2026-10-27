@@ -32,6 +32,13 @@ export interface BridgeIo {
   runTool: BridgeToolRunner;
   /** Answer over the Tauri command channel. */
   answer: BridgeAnswer;
+  /** Optional busy indicator (the "AI is working" pill). begin() wraps the
+   *  whole run; end() always follows — success, error, or mismatch. */
+  busy?: { begin: () => void; end: () => void };
+  /** Optional renderer settle: awaited AFTER the executor finishes but
+   *  BEFORE the answer, so the model's next read (get_canvas, screenshots)
+   *  never sees tldraw geometry mid-render. */
+  settle?: () => Promise<void>;
 }
 
 /** Error text for the model: honest but short. */
@@ -55,11 +62,23 @@ export async function handleCanvasCall(io: BridgeIo, call: AiCanvasCall): Promis
     await io.answer(call.id, false, 'the open canvas changed while the AI was working', null);
     return;
   }
+  const busy = io.busy;
   try {
+    // The pill wraps the whole run: waiting-for-adjust vs. executing.
+    busy?.begin();
     const result = await io.runTool(call.name, call.args ?? {}, call.origin ?? 'assistant');
+    if (io.settle) {
+      try {
+        await io.settle();
+      } catch {
+        // Settling is best-effort; it must never mask a result.
+      }
+    }
     await io.answer(call.id, true, null, result);
   } catch (error) {
     await io.answer(call.id, false, errorMessage(error), null);
+  } finally {
+    busy?.end();
   }
 }
 
@@ -79,6 +98,7 @@ export const EXECUTED_TOOLS = [
   'create_card',
   'create_svg',
   'create_diagram',
+  'convert_selection',
   'create_shapes',
   'add_page',
   'update_shapes',

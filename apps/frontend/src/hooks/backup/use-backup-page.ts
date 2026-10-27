@@ -9,6 +9,7 @@ import {
   type GoogleStatus,
 } from '@/lib/ipc';
 import { errorText } from '@/lib/utils';
+import { toast } from 'sonner';
 
 export type BackupBusyAction = 'connect' | 'backup' | 'import';
 
@@ -46,9 +47,9 @@ export function useBackupPage() {
   const [error, setError] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
 
-  // the server bounces back here after the OAuth round-trip: the notice is
-  // derived once at mount and the params are wiped from the URL right after
-  const [notice, setNotice] = useState<string | null>(() => noticeFromParams(searchParams));
+  // the server bounces back here after the OAuth round-trip: the result is
+  // toasted at mount and the params are wiped from the URL right after
+  const oauthNotice = noticeFromParams(searchParams);
 
   const load = useCallback(async () => {
     const [s, c, bs, st] = await Promise.all([
@@ -93,7 +94,13 @@ export function useBackupPage() {
     };
   }, [connected, workspaceEmpty]);
 
-  // consume the redirect params: the notice lives in state, the URL is clean
+  // consume the redirect params: the result is toasted once, the URL is clean
+  useEffect(() => {
+    if (!oauthNotice) return;
+    const result = searchParams.get('google');
+    if (result === 'connected') toast.success(oauthNotice);
+    else toast.error(oauthNotice);
+  }, [oauthNotice]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (searchParams.has('google')) {
       setSearchParams({}, { replace: true });
@@ -101,84 +108,81 @@ export function useBackupPage() {
   }, [searchParams, setSearchParams]);
 
   const handleConnect = async () => {
-    setError(null);
     setBusy('connect');
     try {
       const result = await api.googleConnect();
       // desktop resolves here; web navigates away and never returns
       if (result.connected) {
-        setNotice(`Connected to ${result.email ?? 'Google Drive'}.`);
+        toast.success(`Connected to ${result.email ?? 'Google Drive'}.`);
       }
       await load();
     } catch (e) {
-      setError(errorText(e));
+      toast.error('Google Drive connection failed', { description: errorText(e) });
     } finally {
       setBusy(null);
     }
   };
 
   const handleDisconnect = async () => {
-    setError(null);
     try {
       await api.googleDisconnect();
-      setNotice('Google Drive disconnected.');
+      toast.success('Google Drive disconnected.');
       await load();
     } catch (e) {
-      setError(errorText(e));
+      toast.error('Could not disconnect Google Drive', { description: errorText(e) });
     }
   };
 
   const handleSaveConfig = async (clientId: string, clientSecret: string | null) => {
-    setError(null);
     try {
       await api.setGoogleConfig(clientId, clientSecret);
       setShowConfig(false);
       setClientSecretDraft('');
+      toast.success('Drive configuration saved.');
       await load();
     } catch (e) {
-      setError(errorText(e));
+      toast.error('Could not save Drive configuration', { description: errorText(e) });
     }
   };
 
   const handleSaveSettings = async () => {
     if (!settingsDraft) return;
-    setError(null);
     try {
       const saved = await api.updateBackupSettings(settingsDraft);
       setSettings(saved);
       setSettingsDraft(saved);
+      toast.success('Backup settings saved.');
       await load();
     } catch (e) {
-      setError(errorText(e));
+      toast.error('Could not save backup settings', { description: errorText(e) });
     }
   };
 
   const handleBackupNow = async () => {
-    setError(null);
-    setNotice(null);
     setBusy('backup');
     try {
       const run = await api.runBackup();
-      setNotice(run ? 'Backup complete.' : 'Nothing to back up yet.');
+      if (run) toast.success('Backup complete.', { description: 'Your workspace is saved to Drive.' });
+      else toast('Nothing to back up yet.');
       await load();
     } catch (e) {
-      setError(errorText(e));
+      toast.error('Backup failed', { description: errorText(e) });
     } finally {
       setBusy(null);
     }
   };
 
   const handleImport = async () => {
-    setError(null);
-    setNotice(null);
     setBusy('import');
     try {
       const r = await api.importBackup();
       setImporting(false);
-      setNotice(`Imported ${r.notebooks} notebooks, ${r.chapters} chapters, ${r.topics} topics.`);
+      toast.success('Backup imported', {
+        description: `${r.notebooks} notebooks, ${r.chapters} chapters, ${r.topics} topics.`,
+      });
       await load();
     } catch (e) {
-      setError(errorText(e));
+      toast.error('Import failed', { description: errorText(e) });
     } finally {
       setBusy(null);
     }
@@ -211,7 +215,6 @@ export function useBackupPage() {
     setClientSecretDraft,
     busy,
     error,
-    notice,
     importing,
     setImporting,
     patchSchedule,

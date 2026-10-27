@@ -88,7 +88,7 @@ export function WorkspaceLayout({
   }, [searchOpen]);
 
   return (
-    <div className="nb-root flex min-h-screen flex-col">
+    <div className="nb-root flex min-h-screen flex-col  ">
       <header
         className={`sticky top-0 z-20 bg-bg/60 backdrop-blur-md ${flat ? '' : 'border-b border-white/[0.06]'}`}
       >
@@ -116,18 +116,20 @@ export function WorkspaceLayout({
               aria-label="Oort Notes home"
               className="flex shrink-0 items-center gap-2"
             >
-              <svg width="20" height="20" viewBox="0 0 22 22" aria-hidden>
-                <circle cx="11" cy="11" r="5" fill="var(--color-fg-1)" />
-                <ellipse
-                  cx="11"
-                  cy="11"
-                  rx="9.5"
-                  ry="4.2"
-                  fill="none"
-                  stroke="var(--color-fg-3)"
-                  strokeWidth="1"
-                  transform="rotate(-24 11 11)"
-                />
+              {/* Oort mark: the app icon's ring + node dot (the violet art
+                  of the final oort-logo.png), minus its black square — same
+                  art as public/favicon.svg, cropped to the mark itself. */}
+              <svg width="20" height="20" viewBox="323 310 634 634" aria-hidden>
+                <defs>
+                  <linearGradient id="oort-ring-nav" gradientUnits="userSpaceOnUse" x1="400" y1="310" x2="850" y2="790">
+                    <stop offset="0" stopColor="#d9cdff" />
+                    <stop offset="0.45" stopColor="#9d7bff" />
+                    <stop offset="0.78" stopColor="#7c4dff" />
+                    <stop offset="1" stopColor="#6432f0" />
+                  </linearGradient>
+                </defs>
+                <circle cx="627" cy="627" r="269" fill="none" stroke="url(#oort-ring-nav)" strokeWidth="70" />
+                <circle cx="912" cy="624" r="45" fill="#ffffff" />
               </svg>
               <span className="text-sm font-medium text-fg-1">Oort Notes</span>
             </Link>

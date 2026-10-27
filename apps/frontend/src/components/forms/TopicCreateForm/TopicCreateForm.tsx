@@ -1,4 +1,4 @@
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useTopicCreateForm } from './useTopicCreateForm';
@@ -28,7 +28,7 @@ export function TopicCreateForm({
         </DialogHeader>
         <form onSubmit={handleCreate} className="flex flex-col gap-4" noValidate>
           <div>
-            <label htmlFor="topic-create-name" className="mb-1.5 block text-[13px] font-medium text-[#a09fab]">
+            <label htmlFor="topic-create-name" className="mb-1.5 block text-[13px] font-medium text-faint">
               Name
             </label>
             <Input
@@ -37,29 +37,24 @@ export function TopicCreateForm({
               onChange={(e) => setName(e.target.value)}
               autoFocus
               placeholder="e.g. Kosaraju's Two-Pass Algorithm"
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  e.preventDefault();
-                  void handleCreate(e as unknown as React.FormEvent);
-                }
-              }}
+
             />
           </div>
 
           {serverError && (
-            <div role="alert" className="rounded-lg border border-[#24232c] bg-[#111016] px-4 py-3 text-sm text-[#f87171]">
+            <div role="alert" className="rounded-lg border border-line bg-surface px-4 py-3 text-sm text-destructive">
               {serverError}
             </div>
           )}
 
-          <DialogFooter className="mt-2">
+          <div className="mt-2 flex w-full justify-end items-center">
             <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>
               Cancel
             </Button>
             <Button type="submit" disabled={!valid || saving}>
               {saving ? 'Creating…' : 'Create'}
             </Button>
-          </DialogFooter>
+          </div>
         </form>
       </DialogContent>
     </Dialog>

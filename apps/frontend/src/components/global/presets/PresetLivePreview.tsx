@@ -9,12 +9,10 @@ export function PresetLivePreview({ config }: { config: PresetConfig }) {
   const colors = ALL_COLORS.filter((c) => !config.colors.hidden.includes(c));
 
   return (
-    <div className="w-80 shrink-0">
+    <div className="w-96 shrink-0">
       <div className="mb-3 flex items-center justify-between">
-        <h3 className="text-sm font-semibold">Live Canvas Preview</h3>
-        <span className="rounded-full bg-primary/20 px-2 py-0.5 text-[10px] font-semibold tracking-wider text-primary">
-          PREVIEW
-        </span>
+        <h3 className="text-sm text-primary/80 font-semibold"> Preview</h3>
+
       </div>
       <div className="relative flex h-[440px] flex-col overflow-hidden rounded-2xl border border-line bg-canvas">
         {/* color palette card */}
@@ -41,11 +39,11 @@ export function PresetLivePreview({ config }: { config: PresetConfig }) {
         </div>
         {/* toolbar preview */}
         <div className="mt-auto flex justify-center pb-4">
-          <div className="flex items-center gap-0.5 rounded-full border border-line bg-surface px-1.5 py-1.5">
+          <div className="flex items-center gap-0.5  rounded-full border border-line bg-surface px-2 py-1.5">
             {visible.map((t) => {
               const Icon = TOOL_ICONS[t.id];
               return (
-                <span key={t.id} className="flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground" title={t.id}>
+                <span key={t.id} className="flex h-6 w-6 items-center justify-center rounded-full text-muted-foreground" title={t.id}>
                   <Icon className="h-4 w-4" />
                 </span>
               );

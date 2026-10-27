@@ -1,6 +1,7 @@
 import { useCallback, useState } from 'react';
 import type { Chapter, Notebook } from '@/lib/ipc';
 import { errorText } from '@/lib/utils';
+import { toast } from 'sonner';
 
 export interface ChapterDialogActions {
   renameNotebook: (name: string) => Promise<void>;
@@ -30,6 +31,7 @@ export function useChapterDialogs({ renameNotebook, renameChapter, deleteChapter
     try {
       await renameNotebook(name);
       setRenamingNotebook(false);
+      toast.success('Notebook renamed', { description: name });
     } catch (e) {
       onError(errorText(e));
     }
@@ -40,6 +42,7 @@ export function useChapterDialogs({ renameNotebook, renameChapter, deleteChapter
     try {
       await renameChapter(renamingChapter, name);
       setRenamingChapter(null);
+      toast.success('Chapter renamed', { description: name });
     } catch (e) {
       onError(errorText(e));
     }
@@ -50,6 +53,7 @@ export function useChapterDialogs({ renameNotebook, renameChapter, deleteChapter
     try {
       await deleteChapter(deletingChapter);
       setDeletingChapter(null);
+      toast.success('Chapter deleted', { description: deletingChapter.name });
     } catch (e) {
       onError(errorText(e));
     }
@@ -60,6 +64,7 @@ export function useChapterDialogs({ renameNotebook, renameChapter, deleteChapter
     if (!deletingNotebook) return;
     try {
       await deleteNotebook(deletingNotebook);
+      toast.success('Notebook deleted', { description: deletingNotebook.name });
     } catch (e) {
       onError(errorText(e));
     }

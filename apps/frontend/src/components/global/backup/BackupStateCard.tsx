@@ -36,7 +36,7 @@ export function BackupStateCard({
           {upToDate &&
             `Backed up ${
               settings?.last_backup_at ? whenAgo(settings.last_backup_at) : 'just now'
-            } — everything is up to date.`}
+            }`}
         </span>
       </div>
       {needsBackup && (

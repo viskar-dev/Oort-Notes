@@ -3,6 +3,7 @@ import { useForm } from 'react-hook-form';
 import { standardSchemaResolver } from '@hookform/resolvers/standard-schema';
 import { api, type CanvasType, type PagePreset, type UiPreset } from '@/lib/ipc';
 import { errorText } from '@/lib/utils';
+import { toast } from 'sonner';
 import {
   chapterCreateFormSchema,
   type ChapterCreateFormValues,
@@ -64,6 +65,7 @@ export function useChapterCreateForm({
         uiPresetId: values.uiPresetId || undefined,
       });
       onCreated();
+      toast.success('Chapter created', { description: values.name.trim() });
     } catch (e) {
       setServerError(errorText(e));
     }

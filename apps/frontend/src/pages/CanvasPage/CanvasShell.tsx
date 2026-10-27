@@ -19,7 +19,9 @@ import { CanvasTopBar } from '@/features/canvas/components/canvas-top-bar';
 import { AiChatPanel, AiConfirmCard } from '@/features/ai/components/ai-chat-panel';
 import { useAiStore } from '@/features/ai/ai-store';
 import { AiCanvasPrompt } from '@/features/ai/components/ai-canvas-prompt';
+import { AiGhostLayer } from '@/features/ai/components/ai-ghost-layer';
 import { useAiBridge } from '@/features/ai/use-ai-bridge';
+import { AiBusyPill } from '@/features/ai/components/ai-busy-pill';
 import { ZoomSlotContext } from '@/components/global/canvas/PresetToolbar';
 import { CanvasSettingsCard } from '@/components/global/canvas/CanvasSettingsCard';
 import { ViewModeHint } from '@/components/global/canvas/ViewModeHint';
@@ -255,11 +257,6 @@ export function CanvasShell({ notebook, chapter }: { notebook: Notebook; chapter
               {error}
             </div>
           )}
-          {pageView.exportError && (
-            <div className="absolute left-1/2 top-4 z-30 -translate-x-1/2 rounded-lg bg-red-950/90 px-4 py-2 text-sm text-red-300 shadow-lg backdrop-blur">
-              PDF export failed: {pageView.exportError}
-            </div>
-          )}
 
           <ViewModeContext.Provider value={pageView.viewMode}>
             {/* chapter-type class lets CSS tune the canvas backdrop: infinite
@@ -300,13 +297,18 @@ export function CanvasShell({ notebook, chapter }: { notebook: Notebook; chapter
 
           {/* AI overlays: the chat panel and the destructive-tool confirm
               card (rendered outside the panel so deletes are confirmable
-              even while the panel is closed). */}
+              even while the panel is closed). The working pill is canvas-
+              wide: it reports tool execution even when the panel is closed. */}
           {!pageView.viewMode && isTauri() && (
             <>
               <AiChatPanel />
               <AiConfirmCard />
               {/* right-click → "AI help…": floating anchored prompt */}
               <AiCanvasPrompt getEditor={getEditor} />
+              {/* glowing ghosts at the exact size/placement of what the AI
+                  is creating (executor-predicted boxes) */}
+              <AiGhostLayer getEditor={getEditor} />
+              <AiBusyPill />
             </>
           )}
 

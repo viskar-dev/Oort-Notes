@@ -19,6 +19,7 @@
         "visible": false,
         "titleBarStyle": "Overlay",
         "hiddenTitle": true,
+        "theme": "dark",
         "zoomHotkeysEnabled": true,
         "dragDropEnabled": false
       }
