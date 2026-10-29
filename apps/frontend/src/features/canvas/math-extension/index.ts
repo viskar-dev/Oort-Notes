@@ -5,6 +5,7 @@ import {
   type Editor as TipTapEditor,
 } from '@tiptap/core';
 import type { Node as PMNode, NodeType } from '@tiptap/pm/model';
+import { DOMParser as PMDOMParser } from '@tiptap/pm/model';
 import { Plugin, TextSelection, type EditorState, type Transaction } from '@tiptap/pm/state';
 import type { EditorView } from '@tiptap/pm/view';
 import katex from 'katex';
@@ -12,8 +13,10 @@ import {
   createShapeId,
   defaultHandleExternalTextContent,
   type Editor as TldrawEditor,
+  type TLShapePartial,
   type VecLike,
 } from 'tldraw';
+import { labelOwners } from './label-editor-registry';
 import type { MathBlockShape } from './math-block-shape';
 import 'katex/dist/katex.min.css';
 
@@ -36,10 +39,19 @@ import 'katex/dist/katex.min.css';
  * text shape with every formula converted; KaTeX/MathJax renders on the
  * clipboard (ChatGPT, docs sites) are recognized by their hidden TeX source.
  *
- * Rules to avoid false positives like "costs $5 and $6": no whitespace is
+ * Rules to avoid inline false positives like "costs $5 and $6": no whitespace is
  * allowed right after the opening `$` or right before the closing `$`, and
  * `\$` is an escape (both for LaTeX's own `\$` and for the opening delimiter).
- * The bracket delimiters `\( \)` and `\[ \]` are never mistaken for prose.
+ * Display delimiters accept everything between them — whitespace, newlines,
+ * whole environments — which is the shape every playbook formula (matrices,
+ * aligned equations) arrives in from ChatGPT and LaTeX tooling. `\( \)` is
+ * never mistaken for prose.
+ *
+ * Materialization gate: a formula only becomes a math atom if KaTeX can
+ * actually parse it (`isRenderableLatex`). Invalid or half-finished LaTeX —
+ * however it arrives, typed or pasted — stays as its literal delimiter text
+ * instead of a red error render, so arbitrary pasted KaTeX can never break
+ * the look of a shape.
  */
 
 /** KaTeX HTML for a formula. Never throws: bad LaTeX renders as red text. */
@@ -56,6 +68,26 @@ export function renderMathHtml(latex: string, display: boolean): string {
     });
   } catch {
     return escapeHtml(latex);
+  }
+}
+
+/** KaTeX parse check: does this latex render *without* an error? The gate
+ *  before any text materializes as a math atom — pasted garbage stays as the
+ *  literal delimiter text it arrived as (still editable, still fixable)
+ *  instead of snapping into a red error render, and a half-finished formula
+ *  being typed materializes only once it actually parses. Never throws. */
+export function isRenderableLatex(latex: string, display: boolean): boolean {
+  try {
+    katex.renderToString(latex, {
+      displayMode: display,
+      throwOnError: true,
+      output: 'html',
+      strict: 'ignore',
+      trust: false,
+    });
+    return true;
+  } catch {
+    return false;
   }
 }
 
@@ -89,29 +121,43 @@ export function mathToPlainText(latex: string, display: boolean): string {
   return display ? `$$${latex}$$` : `$${latex}$`;
 }
 
-// A formula body: starts and ends with a non-whitespace, non-`$` character and
-// may not span lines. `\$` is kept inside the body as a pair so LaTeX's
-// escaped dollar signs don't end the formula early.
+// Inline bodies (`$…$`, `\(...\)`) stay strict: they start and end with a
+// non-whitespace, non-`$` character and may not span lines — that strictness
+// is what keeps prose like "costs $5 and $6" from becoming one huge formula.
+// `\$` is kept inside the body as a pair so LaTeX's escaped dollar signs
+// don't end the formula early.
 const FIRST = String.raw`(?:\\\$|[^\s$])`;
 const MIDDLE = String.raw`(?:\\\$|[^$\n])*`;
 const LAST = String.raw`(?:\\\$|[^\s$])`;
 const BODY = String.raw`(${FIRST}(?:${MIDDLE}${LAST})?)`;
+// Display bodies (`$$…$$`, `\[…\]`) are the opposite: everything between the
+// delimiters is formula — including newlines and the padding whitespace every
+// complex formula (matrices, aligned environments, multi-line integrals)
+// arrives with from ChatGPT and LaTeX tooling. Non-greedy so the nearest
+// closer wins and a stray pair of delimiters can never swallow the document.
+// (Display whitespace was blocked before, which is why pasted complex math
+// never converted — the common shapes `$$\n…\n$$` and `$$ x $$` simply never
+// matched.)
+const DISPLAY_BODY = String.raw`((?:\\\$|[^$])*?)`;
+// `[\s\S]` = any character including a newline (there is no `s` flag on
+// String.raw patterns, and `.` would stop at the line break).
+const BRACKET_BODY = String.raw`([\s\S]+?)`;
 // input rules are anchored at the end: tiptap hands us the text before the
 // cursor, so the closing delimiter must be the last thing typed
-const DISPLAY_RE = new RegExp(String.raw`\$\$${BODY}\$\$$`);
+const DISPLAY_RE = new RegExp(String.raw`\$\$${DISPLAY_BODY}\$\$$`);
 const INLINE_RE = new RegExp(String.raw`(?<![$\\])\$${BODY}\$$`);
 // paste and healing scan text that may carry a neighbour on either side (a
 // pasted range, a formula mid-paragraph), so these only use lookarounds, and
 // they are global so every formula in the run converts at once
-const DISPLAY_SCAN_RE = new RegExp(String.raw`(?<!\$)\$\$${BODY}\$\$`, 'g');
+const DISPLAY_SCAN_RE = new RegExp(String.raw`(?<!\$)\$\$${DISPLAY_BODY}\$\$`, 'g');
 const INLINE_SCAN_RE = new RegExp(String.raw`(?<![$\\])\$${BODY}\$`, 'g');
 // LaTeX/MathJax bracket delimiters, as emitted by ChatGPT's copy button,
 // MathJax and LaTeX tooling. `\[...\]` is display, `\(...\)` is inline; a
 // preceding backslash escapes the opener. No whitespace rules are needed here:
 // nobody writes `\(` in prose, so a match is always a formula.
-const DISPLAY_BRACKET_RE = new RegExp(String.raw`(?<!\\)\\\[([^\n]+?)\\\]`);
+const DISPLAY_BRACKET_RE = new RegExp(String.raw`(?<!\\)\\\[${BRACKET_BODY}\\\]$`);
 const INLINE_PAREN_RE = new RegExp(String.raw`(?<!\\)\\\(([^\n]+?)\\\)`);
-const DISPLAY_BRACKET_SCAN_RE = new RegExp(String.raw`(?<!\\)\\\[([^\n]+?)\\\]`, 'g');
+const DISPLAY_BRACKET_SCAN_RE = new RegExp(String.raw`(?<!\\)\\\[${BRACKET_BODY}\\\]`, 'g');
 const INLINE_PAREN_SCAN_RE = new RegExp(String.raw`(?<!\\)\\\(([^\n]+?)\\\)`, 'g');
 
 interface Point {
@@ -211,11 +257,18 @@ function scanFormulas(text: string, base: number, re: RegExp, display: boolean, 
   re.lastIndex = 0;
   let match: RegExpExecArray | null;
   while ((match = re.exec(text)) !== null) {
-    if (match[1]) {
+    // bodies for the display delimiters may carry boundary whitespace — the
+    // latex is what's left after trimming; the match span itself (from/to)
+    // stays raw so the delimiters are replaced along with the body
+    const latex = match[1]?.trim() ?? '';
+    // materialization gate: only latex KaTeX can parse becomes an atom (see
+    // isRenderableLatex); the match span still covers the delimiters so an
+    // adjacent edit re-scans the same text
+    if (latex && isRenderableLatex(latex, display)) {
       out.push({
         from: base + match.index,
         to: base + match.index + match[0].length,
-        latex: match[1],
+        latex,
         display,
       });
     }
@@ -227,8 +280,11 @@ function scanFormulas(text: string, base: number, re: RegExp, display: boolean, 
 
 type TextRun = { text: string } | { latex: string; display: boolean };
 
-/** Split a plain string into literal runs and formula runs; null when no formula. */
-function splitFormulaRuns(text: string): TextRun[] | null {
+/**
+ * Split a plain string into literal runs and formula runs; null when no
+ * formula. Exported for the delimiter tests (pure, DOM-free).
+ */
+export function splitFormulaRuns(text: string): TextRun[] | null {
   const matches: FormulaMatch[] = [];
   scanFormulas(text, 0, DISPLAY_SCAN_RE, true, matches);
   scanFormulas(text, 0, DISPLAY_BRACKET_SCAN_RE, true, matches);
@@ -258,36 +314,74 @@ function runsToFragment(runs: TextRun[], doc: Document): DocumentFragment {
   return fragment;
 }
 
-/** The latex of a formula that is the entire (trimmed) string, else null. */
-function wholeFormula(text: string, scan: RegExp): string | null {
+/** The latex of a display formula that is the entire (trimmed) string, else
+ *  null — a pasted ChatGPT-style block
+ *
+ *  ```
+ *  $$
+ *  \begin{pmatrix} a \\ b \end{pmatrix}
+ *  $$
+ *  ```
+ *
+ *  is exactly one display formula (newlines between the delimiters are the
+ *  common shape) and becomes a math-block shape. Exported for use and for
+ *  the delimiter tests. */
+export function wholeDisplayFormula(text: string): string | null {
   const trimmed = text.trim();
-  if (!trimmed || trimmed.includes('\n')) return null;
-  scan.lastIndex = 0;
-  const match = scan.exec(trimmed);
-  if (!match?.[1] || match.index !== 0 || match[0].length !== trimmed.length) return null;
-  return match[1];
+  if (!trimmed) return null;
+  for (const scan of [DISPLAY_SCAN_RE, DISPLAY_BRACKET_SCAN_RE]) {
+    scan.lastIndex = 0;
+    const match = scan.exec(trimmed);
+    if (!match?.[1] || match.index !== 0 || match[0].length !== trimmed.length) continue;
+    const latex = match[1].trim();
+    if (latex) return latex;
+  }
+  return null;
 }
 
 /**
- * `<p>` markup for plain text, one paragraph per line (the same structure
- * `toRichText` would create), with formulas as math spans. Null when the text
- * has no formula: the plain-text default path is already correct then.
+ * `<p>` markup for plain text, one paragraph per line — except that a
+ * multi-line display formula may span several lines and then becomes its own
+ * paragraph (a pasted multiline `$$…$$` block keeps its lines together
+ * instead of falling apart into literal text). Formulas elsewhere are math
+ * spans in the line's paragraph. Null when the text has no formula: the
+ * plain-text default path is already correct then.
  */
 function mathHtmlFromText(text: string): string | null {
-  const lines = text.replace(/\r\n?/g, '\n').split('\n');
-  const runsPerLine = lines.map(splitFormulaRuns);
-  if (!runsPerLine.some(Boolean)) return null;
+  const full = text.replace(/\r\n?/g, '\n');
+  const runs = splitFormulaRuns(full);
+  if (!runs) return null;
   const doc = document.implementation.createHTMLDocument('');
-  return lines
-    .map((line, i) => {
-      const p = doc.createElement('p');
-      p.setAttribute('dir', 'auto');
-      const runs = runsPerLine[i];
-      if (runs) p.append(runsToFragment(runs, doc));
-      else p.textContent = line;
-      return p.outerHTML;
-    })
-    .join('');
+  const out: string[] = [];
+  // pieces accumulate the line under construction; multi-line display
+  // formulas flush it and take their own paragraph
+  let line: Array<string | HTMLElement> = [];
+  const pushLine = () => {
+    const p = doc.createElement('p');
+    p.setAttribute('dir', 'auto');
+    for (const piece of line) p.append(piece);
+    out.push(p.outerHTML);
+    line = [];
+  };
+  for (const run of runs) {
+    if ('latex' in run) {
+      if (run.display && run.latex.includes('\n')) {
+        if (line.length > 0) pushLine();
+        line = [toMathElement(run.latex, true)];
+        pushLine();
+      } else {
+        line.push(toMathElement(run.latex, run.display));
+      }
+      continue;
+    }
+    const parts = run.text.split('\n');
+    for (let i = 0; i < parts.length; i++) {
+      if (i > 0) pushLine();
+      if (parts[i]) line.push(parts[i]);
+    }
+  }
+  if (line.length > 0) pushLine();
+  return out.join('');
 }
 
 /**
@@ -305,9 +399,12 @@ function enhanceMathHtml(html: string): string | null {
   for (const annotation of Array.from(
     doc.querySelectorAll('annotation[encoding="application/x-tex"]'),
   )) {
-    const latex = annotation.textContent ?? '';
-    if (!latex.trim()) continue;
+    const latex = (annotation.textContent ?? '').trim();
     const display = !!annotation.closest('.katex-display');
+    // Same materialization gate as everywhere else: if KaTeX can't parse the
+    // site's TeX (MathJax extensions, source-side failures), replacing their
+    // render with our red error would only make it worse — leave it.
+    if (!latex || !isRenderableLatex(latex, display)) continue;
     const host = annotation.closest('.katex-display') ?? annotation.closest('.katex');
     if (!host) continue;
     host.replaceWith(toMathElement(latex, display));
@@ -315,9 +412,9 @@ function enhanceMathHtml(html: string): string | null {
   }
 
   for (const script of Array.from(doc.querySelectorAll('script[type^="math/tex"]'))) {
-    const latex = script.textContent ?? '';
-    if (!latex.trim()) continue;
+    const latex = (script.textContent ?? '').trim();
     const display = (script.getAttribute('type') ?? '').includes('mode=display');
+    if (!latex || !isRenderableLatex(latex, display)) continue;
     script.replaceWith(toMathElement(latex, display));
     changed = true;
   }
@@ -365,11 +462,11 @@ export async function pasteTextWithMath(
   editor: TldrawEditor,
   content: CanvasTextPaste,
 ): Promise<void> {
-  const displayLatex =
-    wholeFormula(content.text, DISPLAY_SCAN_RE) ??
-    wholeFormula(content.text, DISPLAY_BRACKET_SCAN_RE);
-
-  if (displayLatex) {
+  const displayLatex = wholeDisplayFormula(content.text);
+  // the block path runs the same materialization gate: matched-the-delimiters
+  // but can't-parse latex falls through to the text path, where it stays as
+  // literal `$$…$$` lines the user can still read and fix
+  if (displayLatex && isRenderableLatex(displayLatex, true)) {
     const point =
       content.point ??
       (editor.inputs.shiftKey
@@ -496,8 +593,10 @@ export const MathInline = Node.create({
       new InputRule({
         find,
         handler: ({ state, range, match }) => {
-          const latex = match[1];
-          if (!latex) return;
+          const latex = match[1]?.trim();
+          // typing materializes a formula only once it parses: a half-finished
+          // or mis-typed formula stays literal text instead of flashing red
+          if (!latex || !isRenderableLatex(latex, display)) return;
           const tr = state.tr.replaceWith(range.from, range.to, type.create({ latex, display }));
           tr.scrollIntoView();
         },
@@ -519,7 +618,10 @@ export const MathInline = Node.create({
       nodePasteRule({
         find,
         type,
-        getAttributes: (match) => (match[1] ? { latex: match[1], display } : null),
+        getAttributes: (match) => {
+          const latex = match[1]?.trim();
+          return latex && isRenderableLatex(latex, display) ? { latex, display } : null;
+        },
       });
     return [
       make(DISPLAY_SCAN_RE, true),
@@ -538,6 +640,9 @@ export const MathInline = Node.create({
 
   addProseMirrorPlugins() {
     const type = this.type;
+    // The label editor this plugin instance belongs to; `labelOwners`
+    // maps it to the tldraw editor that owns the shape being edited.
+    const labelEditor = this.editor;
     const revealOnPointer = (
       view: EditorView,
       pos: number,
@@ -551,6 +656,51 @@ export const MathInline = Node.create({
           // parses it: KaTeX/MathJax renders become data-latex spans, so the
           // formulas survive the trip as atoms instead of collapsed text
           transformPastedHTML: (html: string) => enhanceMathHtml(html) ?? html,
+          // The editor now pastes like the canvas does: the canvas path
+          // scans the WHOLE plain text once, so a multi-line display formula
+          // stays one formula — while the editor's default route parses the
+          // (usually richer) HTML clipboard into separate paragraphs first
+          // and can never rejoin them. So intercept every paste, run the
+          // exact canvas transform on the plain text, and feed the produced
+          // paragraph markup through the same schema parse the canvas text
+          // path uses. No formula in the paste → the untouched default flow.
+          handlePaste: (view, event) => {
+            const rawText = event.clipboardData?.getData('text/plain') ?? '';
+            if (!rawText) return false;
+            const candidate = mathHtmlFromText(rawText);
+            if (!candidate) return false;
+            const dom = document.createElement('div');
+            dom.innerHTML = candidate;
+            const slice = PMDOMParser.fromSchema(view.state.schema).parseSlice(dom);
+            view.dispatch(view.state.tr.replaceSelection(slice));
+            // Expandable, not shrinkable: pasting must grow the shape around
+            // the content, never cram content into the shape. Edge drags put
+            // text labels in fixed-width mode (pasted lines wrap in the old
+            // narrow width) and corner drags shrink the whole label
+            // (scale < 1 renders pasted formulas tiny). Normalize to natural
+            // size, then tldraw's auto-size re-measure grows the shape to fit.
+            const canvas = labelOwners.get(labelEditor);
+            const shapeId = canvas?.getEditingShapeId();
+            const shape = canvas && shapeId ? canvas.getShape(shapeId) : undefined;
+            const shapeProps = (shape?.props ?? {}) as Partial<{
+              scale: number;
+              autoSize: boolean;
+            }>;
+            if (
+              canvas &&
+              shape &&
+              typeof shapeProps.scale === 'number' &&
+              typeof shapeProps.autoSize === 'boolean' &&
+              (shapeProps.scale !== 1 || !shapeProps.autoSize)
+            ) {
+              canvas.updateShape({
+                id: shape.id,
+                type: shape.type,
+                props: { scale: 1, autoSize: true },
+              } as TLShapePartial);
+            }
+            return true;
+          },
           handleClickOn(view, pos, node, nodePos, event) {
             return revealOnPointer(
               view,

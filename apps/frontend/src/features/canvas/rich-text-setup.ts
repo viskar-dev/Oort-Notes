@@ -1,5 +1,6 @@
 import { tipTapDefaultExtensions, type Editor as TldrawEditor } from 'tldraw';
 import { MathInline, revealMathAtPoint } from '@/features/canvas/math-extension';
+import { labelOwners } from '@/features/canvas/math-extension/label-editor-registry';
 import { ColorMark } from '@/features/canvas/color-mark';
 
 /**
@@ -28,6 +29,9 @@ export function attachEditReveal(editor: TldrawEditor) {
         raf = requestAnimationFrame(tick);
         return;
       }
+      // Remember which canvas owns this label editor: the math paste hook
+      // normalizes the shape's scale/auto-size against it.
+      labelOwners.set(rte, editor);
       if (editor.getEditingShapeId() === shapeId) revealMathAtPoint(rte, point);
     };
     raf = requestAnimationFrame(tick);
