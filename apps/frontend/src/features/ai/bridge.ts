@@ -1,0 +1,115 @@
+/**
+ * The pure core of the AI tool bridge. `use-ai-bridge.ts` wires Tauri's
+ * `listen` to `handleCanvasCall`; the handler is kept dependency-free so
+ * routing rules (canvas pinning, error plumbing) are unit-testable.
+ */
+
+import type { AiCanvasCall } from './ai-ipc';
+
+/** Who a canvas call is for. Mirrors `note_core::ai::bridge::CallOrigin`. */
+export type BridgeCallOrigin = 'assistant' | 'mcp';
+
+/** The origin is part of the executor contract, not just plumbing record:
+ *  destructive tools (delete_shapes) gate per caller — an MCP call must
+ *  confirm back inside the client's own conversation, never via desktop UI. */
+export type BridgeToolRunner = (
+  name: string,
+  args: Record<string, unknown>,
+  origin: BridgeCallOrigin,
+) => Promise<Record<string, unknown>>;
+
+export type BridgeAnswer = (
+  id: string,
+  ok: boolean,
+  error: string | null,
+  result: Record<string, unknown> | null,
+) => Promise<void>;
+
+export interface BridgeIo {
+  /** Where the calls belong: the chapter this shell renders. */
+  chapterId: () => string;
+  /** Tool executors (executors.ts). */
+  runTool: BridgeToolRunner;
+  /** Answer over the Tauri command channel. */
+  answer: BridgeAnswer;
+  /** Optional busy indicator (the "AI is working" pill). begin() wraps the
+   *  whole run; end() always follows — success, error, or mismatch. */
+  busy?: { begin: () => void; end: () => void };
+  /** Optional renderer settle: awaited AFTER the executor finishes but
+   *  BEFORE the answer, so the model's next read (get_canvas, screenshots)
+   *  never sees tldraw geometry mid-render. */
+  settle?: () => Promise<void>;
+}
+
+/** Error text for the model: honest but short. */
+function errorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (typeof error === 'string') return error;
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error);
+  }
+}
+
+/**
+ * Handle one `canvas:call`. The call is rejected up front when the user has
+ * switched canvases since it was pinned — a tool executed against the wrong
+ * canvas is worse than one that fails.
+ */
+export async function handleCanvasCall(io: BridgeIo, call: AiCanvasCall): Promise<void> {
+  if (call.canvas_id !== io.chapterId()) {
+    await io.answer(call.id, false, 'the open canvas changed while the AI was working', null);
+    return;
+  }
+  const busy = io.busy;
+  try {
+    // The pill wraps the whole run: waiting-for-adjust vs. executing.
+    busy?.begin();
+    const result = await io.runTool(call.name, call.args ?? {}, call.origin ?? 'assistant');
+    if (io.settle) {
+      try {
+        await io.settle();
+      } catch {
+        // Settling is best-effort; it must never mask a result.
+      }
+    }
+    await io.answer(call.id, true, null, result);
+  } catch (error) {
+    await io.answer(call.id, false, errorMessage(error), null);
+  } finally {
+    busy?.end();
+  }
+}
+
+/** Tool names executors.ts implements. Checked against the Rust registry at
+ *  startup (below) so a registry/executor mismatch is loud. */
+export const EXECUTED_TOOLS = [
+  'get_canvas',
+  'get_selection',
+  'get_shape',
+  'get_snapshot',
+  'get_screenshot',
+  'create_note',
+  'create_text',
+  'create_math_block',
+  'create_code_block',
+  'create_table',
+  'create_card',
+  'create_svg',
+  'create_diagram',
+  'convert_selection',
+  'create_shapes',
+  'add_page',
+  'update_shapes',
+  'delete_shapes',
+  'focus_viewport',
+] as const;
+
+/** Names in the registry that have no executor here (must be empty).
+ *  `get_snapshot` is internal plumbing yet still executed here for
+ *  save_canvas, so it counts as covered. */
+export function missingExecutors(registryNames: string[]): string[] {
+  const known = new Set<string>(EXECUTED_TOOLS);
+  return registryNames.filter((name) => !known.has(name));
+}

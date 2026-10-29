@@ -420,7 +420,12 @@ export function parseMarkdownTable(text: string): ParsedMarkdownTable | null {
   return { header, aligns, rows };
 }
 
-export function createTableFromMarkdown(editor: Editor, md: ParsedMarkdownTable, point?: VecLike) {
+export function createTableFromMarkdown(
+  editor: Editor,
+  md: ParsedMarkdownTable,
+  point?: VecLike,
+  width?: number,
+) {
   const extensions: any[] = (editor.options as any)?.text?.tipTapConfig?.extensions ?? [];
   const math = extensions.some((e) => e?.name === 'math');
   const toCell = (s: string) => markdownCellToRichText(s, math);
@@ -428,7 +433,7 @@ export function createTableFromMarkdown(editor: Editor, md: ParsedMarkdownTable,
   const rows = md.rows.length ? md.rows : [md.header.map(() => '')];
   const cells = [md.header.map(toCell), ...rows.map((r) => r.map(toCell))];
   const cols = md.header.length;
-  const w = Math.min(1000, Math.max(360, cols * 200));
+  const w = width && width > 0 ? Math.min(1400, Math.max(240, width)) : Math.min(1000, Math.max(360, cols * 200));
   const center = editor.getViewportPageBounds().center;
   const id = createShapeId();
 
@@ -590,6 +595,10 @@ function TableView({ shape }: { shape: TableShape }) {
     if (!el) return;
     const fit = () => {
       if (editor.getIsReadonly()) return;
+      // a zero-ish measurement means the container isn't laid out yet (font
+      // gate, editor recreation, culling remount): writing would collapse
+      // the stored height to the minimum and the selection box with it
+      if (el.offsetHeight <= 0) return;
       const cur = editor.getShape<TableShape>(shape.id);
       if (!cur) return;
       const needed = Math.max(MIN_H, Math.ceil(el.offsetHeight) + 2); // + card border

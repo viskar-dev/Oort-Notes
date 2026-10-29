@@ -18,6 +18,15 @@ pub enum CoreError {
     #[error("google api error: {0}")]
     Google(String),
 
+    #[error("keychain error: {0}")]
+    Keyring(String),
+
+    #[error("ai error: {0}")]
+    Ai(String),
+
+    #[error("external service error: {0}")]
+    External(String),
+
     #[error("internal error: {0}")]
     Internal(String),
 }

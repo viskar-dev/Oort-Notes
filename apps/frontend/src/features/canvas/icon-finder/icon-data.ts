@@ -1,10 +1,14 @@
 import DOMPurify from 'dompurify';
+import { isTauri, invoke } from '@tauri-apps/api/core';
 import { BASE } from '@/ipc/http';
 
 /**
- * Icon data access for the icon finder. Everything loads through OUR backend
- * (`/api/icons/*`, which proxies api.iconify.design server-side and caches) —
- * the browser never fetches a third-party host directly.
+ * Icon data access for the icon finder. Icon search + set bodies come from
+ * the note-core iconify proxy: in the desktop app they arrive straight over
+ * a Tauri invoke (`icon_search` / `icon_set_data`), so no note server has to
+ * run; the web build falls back to the note server's `/api/icons/*` routes —
+ * the same contract, also what e2e tests mock. The browser never fetches
+ * api.iconify.design itself.
  */
 
 /** one iconify set payload — the slice we need to render + wrap bodies */
@@ -34,6 +38,19 @@ async function getJson(path: string): Promise<unknown> {
   return res.json();
 }
 
+/** Search iconify through the core courier (desktop invoke, web server route). */
+async function iconSearch(q: string, limit: number): Promise<IconSearchResult> {
+  if (isTauri()) return invoke<IconSearchResult>('icon_search', { q, limit });
+  return getJson(`/api/icons/search?q=${encodeURIComponent(q)}&limit=${limit}`) as Promise<IconSearchResult>;
+}
+
+/** A set slice through the core courier (desktop invoke, web server route). */
+async function iconSetData(prefix: string, names: string[]): Promise<IconSetData> {
+  if (isTauri()) return invoke<IconSetData>('icon_set_data', { prefix, icons: names });
+  const qs = names.length > 0 ? `?icons=${encodeURIComponent(names.join(','))}` : '';
+  return getJson(`/api/icons/data/${prefix}${qs}`) as Promise<IconSetData>;
+}
+
 function sanitizeBody(body: string): string {
   // iconify bodies are bare svg fragments (`<path/>`, `<polygon/>`) — outside
   // an svg context they parse in the HTML namespace and the svg-only profile
@@ -60,7 +77,8 @@ export function loadIconSet(prefix: string, names: string[]): Promise<IconSetDat
   const inFlight = setPending.get(k);
   if (inFlight) return inFlight;
   const p = (async () => {
-    const raw = (await getJson(`/api/icons/data/${prefix}?icons=${encodeURIComponent(csv)}`)) as IconSetData;
+    const unique = [...new Set(names)].sort();
+    const raw = (await iconSetData(prefix, unique)) as IconSetData;
     const data: IconSetData = {
       ...raw,
       icons: Object.fromEntries(
@@ -109,7 +127,7 @@ export function iconView(
 }
 
 export function searchIcons(q: string, limit = 994): Promise<IconSearchResult> {
-  return getJson(`/api/icons/search?q=${encodeURIComponent(q)}&limit=${limit}`) as Promise<IconSearchResult>;
+  return iconSearch(q, limit);
 }
 
 /** wraps an icon body as a standalone self-contained svg (canvas shapes embed this) */

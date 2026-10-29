@@ -19,9 +19,18 @@ export function PresetEditorPage() {
 
   return (
     <div className="min-h-screen bg-background text-ink">
-      <div className="mx-auto max-w-[1100px] px-10 py-8">
-        {/* breadcrumb */}
-        <div className="mb-4 flex items-center gap-1.5 text-sm text-muted-foreground">
+      <div className="mx-auto max-w-[1100px] pb-8 px-10">
+        {/* breadcrumb (its empty stretch drags the undecorated window;
+            the native caption panel's right clearance is reserved by the
+            rows themselves so the lower content keeps the wide rhythm).
+            The page's top padding lives INSIDE this row so the drag band
+            reaches the window top — padding left on the container left the
+            first 32px dead, making the window look undraggable here. */}
+        <div
+          data-tauri-drag-region
+          className="flex items-center gap-1.5 pt-8 text-sm text-muted-foreground"
+          style={{ paddingRight: 'var(--tauri-plugin-decoration-right-clearance, 0px)' }}
+        >
           <Link to="/settings" className="transition-colors hover:text-ink">
             Settings
           </Link>
@@ -33,7 +42,11 @@ export function PresetEditorPage() {
           <span className="font-medium text-ink">{editor.name || 'Untitled'}</span>
         </div>
 
-        <header className="mb-6 flex items-center justify-between">
+        <header
+          data-tauri-drag-region
+          className="mb-6 flex items-center justify-between pt-4"
+          style={{ paddingRight: 'var(--tauri-plugin-decoration-right-clearance, 0px)' }}
+        >
           <div className="flex items-center gap-3">
             <button
               onClick={() => navigate('/settings')}

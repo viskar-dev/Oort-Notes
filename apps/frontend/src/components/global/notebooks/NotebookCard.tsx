@@ -1,37 +1,13 @@
 import { Link } from 'react-router-dom';
-import { MoreHorizontal } from 'lucide-react';
-import { emblem } from '@/constants/notebooks/emblems';
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { MoreVertical, Star } from 'lucide-react';
+import { DropdownMenu, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { NotebookMenu } from '@/components/global/notebooks/NotebookRow';
+import { accentOpacity, countLine, timeAgo } from '@/components/global/notebooks/notebook-utils';
 import type { Notebook, NotebookFilter } from '@/lib/ipc';
 
-function emblemIcon(icon: string | null) {
-  const Icon = emblem(icon);
-  return <Icon className="mt-3 h-5 w-5 shrink-0" strokeWidth={1.5} style={{ color: 'var(--text-3)' }} />;
-}
-
-function timeAgo(ts: number | null): string {
-  if (!ts) return 'never';
-  const s = Math.floor((Date.now() - ts) / 1000);
-  const m = Math.floor(s / 60);
-  if (m < 1) return 'just now';
-  if (m < 60) return `${m}m ago`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return `${h}h ago`;
-  const d = Math.floor(h / 24);
-  if (d < 7) return `${d}d ago`;
-  if (d < 30) return `${Math.floor(d / 7)}w ago`;
-  return `${Math.floor(d / 30)}mo ago`;
-}
-
-/** deterministic spine accent opacity from the notebook id */
-function spineOpacity(id: string): number {
-  let hash = 0;
-  for (let i = 0; i < id.length; i++) hash = (hash * 31 + id.charCodeAt(i)) | 0;
-  return [1, 0.7, 0.5, 0.35][Math.abs(hash) % 4];
-}
-
-/** One notebook on the home grid: its cover (a real link), option menu and
- *  favorite ribbon. */
+/** One notebook as a flat grid card: hairline border, color bar, name +
+ *  meta. The behavior (link to open, favorite, option menu) is identical to
+ *  the list row; only the skin differs. */
 export function NotebookCard({
   notebook: nb,
   filter,
@@ -49,122 +25,75 @@ export function NotebookCard({
   onToggleArchive: () => void;
   onDelete: () => void;
 }) {
-  // "NOTEBOOK" is a legacy default: treat it as empty
-  const tag =
-    nb.label && nb.label.toUpperCase() !== 'NOTEBOOK' && nb.label.toLowerCase() !== nb.name.toLowerCase()
-      ? nb.label
-      : null;
   const archived = nb.archived_at !== null;
-  const countLine =
-    nb.chapters_count === 0 && nb.topics_count === 0
-      ? 'No chapters yet'
-      : `${nb.chapters_count} ${nb.chapters_count === 1 ? 'chapter' : 'chapters'} · ${nb.topics_count} ${nb.topics_count === 1 ? 'topic' : 'topics'}`;
+  const dimmed = filter === 'archived' && archived;
+
+  // cursor spotlight (visual only) — same trick as the list row
+  const trackPointer = (e: React.MouseEvent<HTMLDivElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    e.currentTarget.style.setProperty('--mx', `${e.clientX - rect.left}px`);
+    e.currentTarget.style.setProperty('--my', `${e.clientY - rect.top}px`);
+  };
 
   return (
     <div
-      className="nb-card group relative select-none"
-      style={{ width: '100%', maxWidth: 200, marginRight: 8, marginBottom: 8 }}
+      onMouseMove={trackPointer}
+      className="group relative h-[104px] rounded-lg border border-white/[0.06] bg-transparent p-4 pl-5 transition-[border-color,background-color] duration-150 hover:border-white/[0.12] hover:bg-white/[0.03]"
+      style={{ opacity: dimmed ? 0.55 : 1 }}
     >
+      {/* cursor spotlight */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0 rounded-lg opacity-0 transition-opacity duration-150 group-hover:opacity-100"
+        style={{
+          background:
+            'radial-gradient(140px circle at var(--mx, 50%) var(--my, 50%), rgba(124,124,248,0.07), transparent 70%)',
+        }}
+      />
+
+      {/* color bar */}
+      <span
+        aria-hidden
+        className="absolute left-0 top-3.5 bottom-3.5 w-[3px] rounded-full bg-iris"
+        style={{ opacity: accentOpacity(nb.id) * 0.7 }}
+      />
+
       <Link
         to={`/notebooks/${nb.id}`}
-        title={`${countLine} · Edited ${timeAgo(nb.updated_at)}`}
-        className="nb-cover relative flex w-full cursor-pointer flex-col"
-        style={{
-          aspectRatio: '3 / 4',
-          opacity: filter === 'archived' && archived ? 0.55 : 1,
-          borderRadius: '4px 18px 18px 4px',
-          border: '1px solid var(--border)',
-        }}
-        // data-nb-open preserves the cover as the card's open target for tests
+        title={`${countLine(nb.chapters_count, nb.topics_count)} · Edited ${timeAgo(nb.updated_at)}`}
         aria-label={`Open ${nb.name}`}
+        className="flex h-full min-w-0 flex-col"
       >
-        {/* spine */}
-        <div
-          className="absolute bottom-0 left-0 top-0 w-[28px] overflow-hidden"
-          style={{
-            background: 'var(--spine)',
-            backgroundImage:
-              'linear-gradient(90deg, rgba(0,0,0,0.35) 0%, rgba(255,255,255,0.05) 60%, rgba(0,0,0,0.18) 100%)',
-            borderRight: '1px solid var(--border)',
-            borderRadius: '4px 0 0 4px',
-          }}
-        >
-          <div
-            className="absolute bottom-0 left-0 top-0 w-[3px]"
-            style={{ background: 'var(--primary)', opacity: spineOpacity(nb.id) }}
-          />
-        </div>
-
-        {/* hinge shadow */}
-        <div
-          className="pointer-events-none absolute bottom-0 top-0 w-[10px]"
-          style={{
-            left: 28,
-            background: 'linear-gradient(90deg, rgba(0,0,0,0.28), rgba(0,0,0,0))',
-          }}
-        />
-
-        {/* face */}
-        <div className="flex min-h-0 flex-1 flex-col items-center pb-5 pl-[28px] pr-4 pt-5">
-          <div className="flex min-h-0 flex-1 flex-col items-center justify-center px-2 text-center">
-            <h3
-              className="line-clamp-3 text-[22px] font-medium leading-[1.25] text-[#f4f4f6]"
-              style={{ fontFamily: 'Georgia, "Times New Roman", serif' }}
-            >
-              {nb.name}
-            </h3>
-            <div
-              className="mt-1.5 line-clamp-2 text-[11px] text-[#a09fab]"
-              style={{ fontFamily: 'Georgia, "Times New Roman", serif' }}
-            >
-              {tag ?? countLine}
-            </div>
-          </div>
-
-          {emblemIcon(nb.icon)}
-        </div>
-
-        {/* favorite ribbon */}
-        {nb.is_favorite && (
-          <span
-            className="absolute top-0 h-[28px] w-[16px]"
-            style={{
-              right: 22,
-              background: 'var(--primary)',
-              clipPath: 'polygon(0 0, 100% 0, 100% 100%, 50% 82%, 0 100%)',
-            }}
-          />
-        )}
+        <h3 className="truncate pr-14 text-[15px] font-medium text-fg-1">{nb.name}</h3>
+        <p className="mt-0.5 truncate text-xs text-fg-3 tabular-nums">
+          {countLine(nb.chapters_count, nb.topics_count)} · {timeAgo(nb.updated_at)}
+        </p>
       </Link>
 
-      {/* three-dot menu (hover/focus reveal) */}
+      {/* favorite + option menu: hover-revealed, keyboard reachable */}
+      <button
+        onClick={onToggleFavorite}
+        aria-label={nb.is_favorite ? `Remove ${nb.name} from favorites` : `Add ${nb.name} to favorites`}
+        className={`absolute right-8 top-2.5 flex h-7 w-7 items-center justify-center rounded-lg transition-opacity duration-100 hover:bg-white/[0.04] focus-visible:opacity-100 group-hover:opacity-100 ${
+          nb.is_favorite ? 'text-iris' : 'text-fg-3 opacity-0 hover:text-fg-1'
+        }`}
+      >
+        <Star className="h-4 w-4" strokeWidth={1.5} fill={nb.is_favorite ? 'currentColor' : 'none'} />
+      </button>
+
       <DropdownMenu>
         <DropdownMenuTrigger
           render={
             <button
               onClick={(e) => e.stopPropagation()}
-              title="Notebook options"
-              className="absolute right-2 top-2 z-10 flex h-7 w-7 items-center justify-center rounded-full border opacity-0 transition-opacity focus-visible:opacity-100 group-hover:opacity-100 hover:opacity-100 data-popup-open:opacity-100"
-              style={{ background: '#14141a', borderColor: 'var(--border)', color: 'var(--text-2)' }}
+              aria-label={`Options for ${nb.name}`}
+              className="absolute right-2.5 top-2.5 z-10 flex h-7 w-7 items-center justify-center rounded-lg text-fg-3 opacity-0 transition-opacity duration-100 hover:bg-white/[0.04] hover:text-fg-1 focus-visible:opacity-100 group-hover:opacity-100 data-popup-open:opacity-100"
             >
-              <MoreHorizontal className="h-4 w-4" />
+              <MoreVertical className="h-4 w-4" strokeWidth={1.5} />
             </button>
           }
         />
-        <DropdownMenuContent align="end" className="w-[200px]">
-          <DropdownMenuItem onClick={onOpen}>Open</DropdownMenuItem>
-          <DropdownMenuItem onClick={onRename}>Rename</DropdownMenuItem>
-          <DropdownMenuItem onClick={onToggleFavorite}>
-            {nb.is_favorite ? 'Remove from favorites' : 'Add to favorites'}
-          </DropdownMenuItem>
-          <DropdownMenuItem onClick={onToggleArchive}>
-            {archived ? 'Unarchive' : 'Archive'}
-          </DropdownMenuItem>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem variant="destructive" onClick={onDelete}>
-            Delete
-          </DropdownMenuItem>
-        </DropdownMenuContent>
+        <NotebookMenu nb={nb} archived={archived} onOpen={onOpen} onRename={onRename} onToggleFavorite={onToggleFavorite} onToggleArchive={onToggleArchive} onDelete={onDelete} />
       </DropdownMenu>
     </div>
   );

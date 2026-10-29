@@ -1,0 +1,1220 @@
+/**
+ * The webview side of the AI tool registry: one executor per tool. The AI
+ * bridge (use-ai-bridge) routes `canvas:call` events here; these functions
+ * are the ONLY place that talks to the tldraw editor on the model's behalf.
+ *
+ * Design rules:
+ * - Every result is plain JSON. The model never sees tldraw internals.
+ * - Mutating executors wrap their changes in a single `editor.run()` (one
+ *   undo entry per tool call; the grouped-undo marker comes from the
+ *   `canvas:begin`/`canvas:end` events the Rust side sends around batches).
+ * - Destructive work goes through the confirm store (inline card in the
+ *   AI panel).
+ * - Placement is deterministic: blocks the model creates without explicit
+ *   x/y are laid out against the existing content or the open page sheet,
+ *   never on top of it.
+ */
+
+import { getSnapshot, toRichText, type Box, type Editor, type TLShapeId } from 'tldraw';
+import { prepareSvg } from '@/features/canvas/svg-diagram/svg-diagram-shape';
+import { CODE_LANGUAGES } from '@/features/canvas/code-block/code-block-shape';
+import { parseMarkdownTable, createTableFromMarkdown } from '@/features/canvas/table-shape';
+import { outlineShapes, fullShapeState } from './canvas-outline';
+import { buildRichDocument } from './rich-text';
+import { confirmShapeDeletion } from './confirm-store';
+import type { AiDestructivePolicy } from './policy-store';
+import { layoutDiagram } from './diagram-layout';
+import { useAiGhostStore, ghostConfig } from './ghost-store';
+
+/** What the executors need to know about the chapter rendering context
+ *  (pages-mode geometry). Provided by the canvas shell via use-ai-bridge. */
+export interface AiCanvasContext {
+  canvas_type: string;
+  /** Pages-mode sheet geometry; null on infinite canvases. */
+  page: { width: number; height: number; gap: number; count: number } | null;
+}
+
+/** Shape types `create_shapes` may pass through. Custom shapes (icon, card,
+ *  table…) are left out: their required props are app-specific and a
+ *  misplaced guess renders badly or breaks. */
+const CREATE_TYPES = new Set(['geo', 'text', 'note', 'arrow', 'line', 'frame', 'svg-diagram']);
+
+/** Tools the AI may call that change the canvas. Exported for the canvas
+ *  floating prompt: a turn whose slice ran none of these is a question to
+ *  the user (clarification), not a delivery, so it routes to the assistant
+ *  chat window. */
+export const MUTATING_TOOLS = new Set([
+  'create_note',
+  'create_text',
+  'create_math_block',
+  'create_code_block',
+  'create_table',
+  'create_card',
+  'create_svg',
+  'create_diagram',
+  'create_shapes',
+  'convert_selection',
+  'add_page',
+  'update_shapes',
+  'delete_shapes',
+]);
+
+const DEFAULT_NOTE_W = 220;
+
+/** Pages-mode capability the canvas shell exposes to the AI: extends a
+ *  topic's sheet stack through the same path the toolbar's "+ page" button
+ *  walks (state + stack constraints + camera). */
+export interface AiPagesOption {
+  id: string;
+  name: string;
+  /** Sheet count; filled for the active topic only. */
+  page_count?: number;
+}
+
+export interface AiPagesCapability {
+  /** The topic whose stack the canvas currently shows. */
+  active_topic_id: string | null;
+  topics: AiPagesOption[];
+  /** Add one sheet to the topic's stack; returns the persisted page row. */
+  addPage: (topicId: string) => Promise<{ id: string; name: string; index: number }>;
+}
+
+export interface AiExecutorDeps {
+  editor: Editor;
+  /** Chapter rendering context (pages-mode geometry). */
+  context: () => AiCanvasContext;
+  /** Destructive gate for assistant calls (inline card in the AI panel). */
+  confirm: (title: string, detail: string) => Promise<boolean>;
+  /** True in view mode: mutations are rejected, reads go through. */
+  readOnly: () => boolean;
+  /** Who the call is for. The assistant confirms destructive tools through
+   *  `confirm`; MCP-origin calls confirm inside the client's own
+   *  conversation (`confirmed` arg) and must never trigger desktop UI. */
+  origin: 'assistant' | 'mcp';
+  /** The stored destructive-policy setting — consulted for MCP callers
+   *  only ("auto_confirm" skips the requires_confirmation round-trip). */
+  destructivePolicy: () => AiDestructivePolicy;
+  /** Pages-mode sheet stacks (page-type canvases); missing elsewhere. */
+  pages?: () => AiPagesCapability | null;
+}
+
+type ToolArgs = Record<string, unknown>;
+type ToolValue = Record<string, unknown>;
+
+/** Route one registry tool call by name. Throws user-readable errors— the
+ *  bridge turns them into the `canvas_result` error field. */
+export async function executeAiTool(
+  deps: AiExecutorDeps,
+  name: string,
+  args: ToolArgs,
+): Promise<ToolValue> {
+  if (MUTATING_TOOLS.has(name) && deps.readOnly()) {
+    throw new Error('the canvas is in view mode: turn off view mode to let the AI edit');
+  }
+  switch (name) {
+    case 'get_canvas':
+      return getCanvas(deps);
+    case 'get_selection':
+      return { shapes: outlineShapes(deps.editor, deps.editor.getSelectedShapeIds()) };
+    case 'get_shape':
+      return getShape(deps.editor, args);
+    case 'get_snapshot':
+      // Internal plumbing for forced saves; never advertised to models.
+      return { snapshot: getSnapshot(deps.editor.store), tldraw_version: null };
+    case 'get_screenshot':
+      return await screenshot(deps.editor, args);
+    case 'create_note':
+      return createNote(deps, args);
+    case 'create_text':
+      return createText(deps, args);
+    case 'create_math_block':
+      return createMathBlock(deps, args);
+    case 'create_code_block':
+      return createCodeBlock(deps, args);
+    case 'create_table':
+      return createTable(deps, args);
+    case 'create_card':
+      return createCard(deps, args);
+    case 'create_svg':
+      return await createSvg(deps, args);
+    case 'create_diagram':
+      return createDiagram(deps, args);
+    case 'convert_selection':
+      return await convertSelection(deps, args);
+    case 'create_shapes':
+      return createShapes(deps, args);
+    case 'update_shapes':
+      return updateShapes(deps.editor, args);
+    case 'delete_shapes':
+      return await deleteShapes(deps, args);
+    case 'focus_viewport':
+      return focusViewport(deps.editor, args);
+    case 'add_page':
+      return await addPage(deps, args);
+    default:
+      throw new Error(`no executor for "${name}"`);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// reads
+// ---------------------------------------------------------------------------
+
+/** get_canvas: outlines plus the pages-mode geometry the layout rules need. */
+function getCanvas(deps: AiExecutorDeps): ToolValue {
+  const editor = deps.editor;
+  const ctx = deps.context();
+  const ids = [...editor.getCurrentPageShapeIds()];
+  // Pages mode: every outline reports the sheet it sits on.
+  const pages = ctx.canvas_type === 'page' && ctx.page ? ctx.page : undefined;
+  return { shapes: outlineShapes(editor, ids, pages), canvas: { ...ctx } };
+}
+
+/** Blob → raw base64 (no data: prefix; mime is reported separately). */
+async function blobToBase64(blob: Blob): Promise<string> {
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  let binary = '';
+  const CHUNK = 0x8000;
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+  }
+  return btoa(binary);
+}
+
+/** PNG of the canvas (or selection) for visual questions. */
+async function screenshot(editor: Editor, args: ToolArgs): Promise<ToolValue> {
+  const focusSelection = args.focus_selection === true;
+  const ids = focusSelection ? editor.getSelectedShapeIds() : [...editor.getCurrentPageShapeIds()];
+  if (ids.length === 0) {
+    throw new Error('nothing to screenshot: the selection is empty');
+  }
+
+  // Zoom factor: never upscale past 2x, cover the requested target width.
+  let bounds = editor.getShapePageBounds(ids[0])!.clone();
+  for (const id of ids.slice(1)) {
+    const next = editor.getShapePageBounds(id);
+    if (next) bounds.expand(next);
+  }
+  const target = Math.max(320, Math.min(2400, Number(args.max_width) || 1568));
+  const scale = Math.max(1, Math.min(2, target / Math.max(bounds.w, 1)));
+
+  const image = await editor.toImage(ids, { format: 'png', background: true, scale, padding: 16 });
+  if (!image.blob) throw new Error('screenshot export failed');
+  const base64 = await blobToBase64(image.blob);
+  return { image_base64: base64, mime: 'image/png', width: image.width, height: image.height };
+}
+
+/** Complete internal state of one shape (the model's editing source of
+ *  truth). The id must have come from a tool result. */
+function getShape(editor: Editor, args: ToolArgs): ToolValue {
+  const id = args.shape_id;
+  if (typeof id !== 'string' || !id.startsWith('shape:')) {
+    throw new Error('"shape_id" must be a shape id a tool returned (it starts with "shape:")');
+  }
+  const state = fullShapeState(editor, id as TLShapeId);
+  if (!state) throw new Error(`no shape with id ${id} on this canvas`);
+  return state;
+}
+
+// ---------------------------------------------------------------------------
+// ghost glow: the canvas announces what is about to land
+// ---------------------------------------------------------------------------
+
+/** Two painted frames plus a short beat: the glow has to hit the screen and
+ *  read as "forming here" before the real shapes replace it. Skips the rAF
+ *  part where frames don't exist (hidden webviews, bare test environments) —
+ *  the timer alone still gives the glow its moment. */
+async function ghostDwell(): Promise<void> {
+  if (typeof requestAnimationFrame === 'function') {
+    await new Promise<void>((resolve) =>
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+    );
+  }
+  await new Promise<void>((resolve) => setTimeout(resolve, ghostConfig.dwellMs));
+}
+
+/** Per-shape page-space boxes — the glow laid ON the shapes being edited so
+ *  each one visibly shimmers as it transforms. Defensive everywhere: an
+ *  editor that can't answer bounds just means no glow, never a failed tool
+ *  call. Gigantic selections roll up into one union card past a cap (a glow
+ *  per shape stops being readable long before it stops being renderable). */
+const SELECTION_GLOW_CAP = 24;
+
+function perShapeBoxes(editor: Editor, ids: TLShapeId[]): LayoutRect[] {
+  const boxes: LayoutRect[] = [];
+  try {
+    for (const id of ids) {
+      const bounds = editor.getShapePageBounds(id);
+      if (!bounds) continue;
+      boxes.push({ x: bounds.x, y: bounds.y, w: bounds.w, h: bounds.h });
+    }
+  } catch {
+    return [];
+  }
+  if (boxes.length > SELECTION_GLOW_CAP) {
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    for (const box of boxes) {
+      minX = Math.min(minX, box.x);
+      minY = Math.min(minY, box.y);
+      maxX = Math.max(maxX, box.x + box.w);
+      maxY = Math.max(maxY, box.y + box.h);
+    }
+    return [{ x: minX, y: minY, w: maxX - minX, h: maxY - minY }];
+  }
+  return boxes;
+}
+
+// ---------------------------------------------------------------------------
+// deterministic placement
+// ---------------------------------------------------------------------------
+
+interface LayoutRect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+const LAYOUT_GAP = 72;
+const PAGE_INSET = 40;
+
+const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
+
+/** The part of the canvas the AI composes in (the visible viewport on
+ *  infinite canvases; the active sheet in pages mode) plus the bounding box
+ *  of existing content inside it. */
+function layoutRegion(editor: Editor, deps: AiExecutorDeps): { region: LayoutRect; content: LayoutRect | null } {
+  const ctx = deps.context();
+  const viewport = editor.getViewportPageBounds();
+  let region: LayoutRect;
+  if (ctx.page && ctx.canvas_type === 'page') {
+    // Sheets are stacked at y = i * (height + gap); the active one holds the
+    // viewport's vertical midpoint.
+    const pitch = ctx.page.height + ctx.page.gap;
+    const midY = viewport.y + viewport.h / 2;
+    const sheet = clamp(Math.floor(midY / pitch), 0, Math.max(0, ctx.page.count - 1));
+    region = { x: 0, y: sheet * pitch, w: ctx.page.width, h: ctx.page.height };
+  } else {
+    region = { x: viewport.x, y: viewport.y, w: viewport.w, h: viewport.h };
+  }
+
+  let content: LayoutRect | null = null;
+  for (const id of editor.getCurrentPageShapeIds()) {
+    const shape = editor.getShape(id);
+    if (!shape) continue;
+    let bounds: Box;
+    try {
+      const pageBounds = editor.getShapePageBounds(id);
+      if (!pageBounds) continue;
+      bounds = pageBounds;
+    } catch {
+      continue;
+    }
+    // Only content inside the region anchors placement.
+    if (
+      bounds.maxX < region.x ||
+      bounds.minX > region.x + region.w ||
+      bounds.maxY < region.y ||
+      bounds.minY > region.y + region.h
+    ) {
+      continue;
+    }
+    const rect = { x: bounds.minX, y: bounds.minY, w: bounds.w, h: bounds.h };
+    if (!content) {
+      content = rect;
+    } else {
+      const x = Math.min(content.x, rect.x);
+      const y = Math.min(content.y, rect.y);
+      content = {
+        x,
+        y,
+        w: Math.max(content.x + content.w, rect.x + rect.w) - x,
+        h: Math.max(content.y + content.h, rect.y + rect.h) - y,
+      };
+    }
+  }
+  return { region, content };
+}
+
+/** Where a new block of w×h goes. Explicit x/y always win; otherwise it
+ *  attaches to the content bounding box on the requested side ('below'
+ *  default) and is clamped into the region, so AI output never lands on top
+ *  of existing content and stays inside the open sheet. */
+function planPlacement(
+  editor: Editor,
+  deps: AiExecutorDeps,
+  args: ToolArgs,
+  w: number,
+  h: number,
+): { x: number; y: number } {
+  const { region, content } = layoutRegion(editor, deps);
+  let target: { x: number; y: number };
+  if (typeof args.x === 'number' && Number.isFinite(args.x) && typeof args.y === 'number' && Number.isFinite(args.y)) {
+    target = { x: args.x, y: args.y };
+  } else if (content) {
+    const side = typeof args.side === 'string' ? args.side : '';
+    target =
+      side === 'left'
+        ? { x: content.x - LAYOUT_GAP - w, y: content.y }
+        : side === 'right'
+          ? { x: content.x + content.w + LAYOUT_GAP, y: content.y }
+          : side === 'above'
+            ? { x: content.x, y: content.y - LAYOUT_GAP - h }
+            : { x: content.x + content.w / 2 - w / 2, y: content.y + content.h + LAYOUT_GAP };
+  } else {
+    // Nothing to anchor on: start near the top of the region (centered).
+    target = { x: region.x + region.w / 2 - w / 2, y: region.y + PAGE_INSET };
+  }
+  // Keep the block inside the region (centered if it simply does not fit).
+  const maxX = region.x + region.w - w - PAGE_INSET;
+  const maxY = region.y + region.h - h - PAGE_INSET;
+  return {
+    x: maxX < region.x + PAGE_INSET
+      ? region.x + (region.w - w) / 2
+      : clamp(target.x, region.x + PAGE_INSET, maxX),
+    y: maxY < region.y + PAGE_INSET
+      ? region.y + (region.h - h) / 2
+      : clamp(target.y, region.y + PAGE_INSET, maxY),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// shared helpers
+// ---------------------------------------------------------------------------
+
+const newShapeId = (): TLShapeId => `shape:${crypto.randomUUID()}` as TLShapeId;
+
+function requiredText(args: ToolArgs, field = 'text'): string {
+  const text = args[field];
+  if (typeof text !== 'string' || text.trim().length === 0) {
+    throw new Error(`"${field}" is required and must be a non-empty string`);
+  }
+  return text;
+}
+
+const asArray = (args: ToolArgs, field: string): ToolArgs[] => {
+  const list = args[field];
+  if (!Array.isArray(list) || list.length === 0) {
+    throw new Error(`"${field}" must be a non-empty array`);
+  }
+  return list.filter((entry): entry is ToolArgs => entry !== null && typeof entry === 'object');
+};
+
+/** The direction the arrows push; null edges (a→a etc.) are dropped by the
+ *  layout already. */
+function asScheme(value: ToolArgs['shape']): 'rect' | 'round' | 'diamond' | 'note' {
+  return value === 'round' || value === 'diamond' || value === 'note' ? value : 'rect';
+}
+
+/** width arg → clamped size (must not be smaller than min). */
+function widthArg(args: ToolArgs, min: number, max: number, fallback: number): number {
+  const parsed = typeof args.width === 'number' && Number.isFinite(args.width) ? args.width : fallback;
+  return clamp(parsed, min, max);
+}
+
+/** Rough height estimates keep placement enough room; the shapes themselves
+ *  auto-fit their height to content after creation. */
+const textLines = (text: string) => text.split(/\r?\n/).length;
+
+/** Outline-friendly rounding for the geometry this module reports back. */
+const round = (value: number) => Math.round(value * 100) / 100;
+
+// ---------------------------------------------------------------------------
+// creates
+// ---------------------------------------------------------------------------
+
+async function createNote(deps: AiExecutorDeps, args: ToolArgs): Promise<ToolValue> {
+  const editor = deps.editor;
+  const text = requiredText(args);
+  const w = widthArg(args, 160, 1200, DEFAULT_NOTE_W);
+  const h = Math.max(64, textLines(text) * 30 + 30);
+  const at = planPlacement(editor, deps, args, w, h);
+  const id = newShapeId();
+  // The ghost is the box just placed (the same aspect ratio the tool args
+  // gave us) — the glow beat is spent before the real shape lands.
+  const ghost = useAiGhostStore.getState().push([{ x: at.x, y: at.y, w, h }]);
+  try {
+    await ghostDwell();
+    editor.run(() => {
+      editor.createShape({
+        id,
+        type: 'note',
+        x: at.x,
+        y: at.y,
+        props: { richText: buildRichDocument(text) as never },
+      });
+      // "Preferred width"(>120): notes resize through their scale prop.
+      if (w !== DEFAULT_NOTE_W) {
+        const scale = Math.max(0.35, Math.min(4, w / DEFAULT_NOTE_W));
+        editor.updateShape({ id, type: 'note', props: { scale } });
+      }
+    });
+  } finally {
+    useAiGhostStore.getState().remove(ghost);
+  }
+  return { created: id, x: round(at.x), y: round(at.y), w: round(w), h: round(h) };
+}
+
+/** Native free-standing text: one style, no box, auto-sized. The rough w/h
+ *  estimate only feeds the placement clamps; tldraw measures for real. */
+function createText(deps: AiExecutorDeps, args: ToolArgs): Promise<ToolValue> {
+  const editor = deps.editor;
+  const text = requiredText(args);
+  const scale = args.heading === true ? 2 : 1;
+  const lines = Math.max(1, textLines(text));
+  const longest = Math.max(...text.split(/\r?\n/).map((l) => l.length), 1);
+  const w = Math.min(1200, Math.max(60, longest * 7.2 * scale));
+  const h = Math.min(2000, lines * 36 * scale + 8);
+  const at = planPlacement(editor, deps, args, w, h);
+  const id = newShapeId();
+  const ghost = useAiGhostStore.getState().push([{ x: at.x, y: at.y, w, h }]);
+  return (async () => {
+    try {
+      await ghostDwell();
+      editor.run(() => {
+        editor.createShape({
+          id,
+          type: 'text',
+          x: at.x,
+          y: at.y,
+          props: { richText: toRichText(text) as never, autoSize: true, scale },
+        });
+      });
+    } finally {
+      useAiGhostStore.getState().remove(ghost);
+    }
+    return { created: id, x: round(at.x), y: round(at.y), w: round(w), h: round(h) };
+  })();
+}
+
+async function createMathBlock(deps: AiExecutorDeps, args: ToolArgs): Promise<ToolValue> {
+  const editor = deps.editor;
+  const latex = requiredText(args, 'latex');
+  const w = widthArg(args, 160, 900, 320);
+  const lines = textLines(latex);
+  const h = lines > 1 ? Math.max(64, lines * 28 + 32) : 96;
+  const at = planPlacement(editor, deps, args, w, h);
+  const id = newShapeId();
+  const ghost = useAiGhostStore.getState().push([{ x: at.x, y: at.y, w, h }]);
+  try {
+    await ghostDwell();
+    editor.run(() => {
+      editor.createShape({
+        id,
+        type: 'math-block',
+        x: at.x,
+        y: at.y,
+        props: { w, h, latex },
+      });
+    });
+  } finally {
+    useAiGhostStore.getState().remove(ghost);
+  }
+  return { created: id, x: round(at.x), y: round(at.y), w: round(w), h: round(h) };
+}
+
+async function createCodeBlock(deps: AiExecutorDeps, args: ToolArgs): Promise<ToolValue> {
+  const editor = deps.editor;
+  const code = requiredText(args, 'code');
+  const language =
+    typeof args.language === 'string' && (CODE_LANGUAGES as readonly string[]).includes(args.language)
+      ? (args.language as (typeof CODE_LANGUAGES)[number])
+      : 'typescript';
+  const w = widthArg(args, 320, 1400, 560);
+  // header 25 + body padding 24 + border 2 ≈ 51; ~20px per code line at 13px
+  const h = clamp(51 + textLines(code) * 21, 120, 2000);
+  const at = planPlacement(editor, deps, args, w, Math.min(h, 400));
+  const id = newShapeId();
+  // Placement plans against the visible cap (400); the glow mirrors that.
+  const ghost = useAiGhostStore.getState().push([{ x: at.x, y: at.y, w, h: Math.min(h, 400) }]);
+  try {
+    await ghostDwell();
+    editor.run(() => {
+      editor.createShape({
+        id,
+        type: 'code-block',
+        x: at.x,
+        y: at.y,
+        props: { w, h, code, language, fontSize: 13, autoHeight: true },
+      });
+    });
+  } finally {
+    useAiGhostStore.getState().remove(ghost);
+  }
+  return { created: id, language, x: round(at.x), y: round(at.y), w: round(w), h: round(h) };
+}
+
+async function createTable(deps: AiExecutorDeps, args: ToolArgs): Promise<ToolValue> {
+  const editor = deps.editor;
+  const markdown = args.markdown;
+  if (typeof markdown !== 'string' || markdown.trim().length === 0) {
+    throw new Error('"markdown" is required: a GFM table (header row, | --- | delimiter row, rows)');
+  }
+  const parsed = parseMarkdownTable(markdown);
+  if (!parsed) {
+    throw new Error(
+      '"markdown" must be a GitHub-flavored table: header row, a | --- | delimiter row, then one row per line',
+    );
+  }
+  const cols = parsed.header.length;
+  const fallbackW = clamp(cols * 200, 360, 1000);
+  const w = widthArg(args, 240, 1400, fallbackW);
+  const rowCount = parsed.rows.length || 1;
+  const h = 60 + (rowCount + 1) * 46;
+  const at = planPlacement(editor, deps, args, w, h);
+  const ghost = useAiGhostStore.getState().push([{ x: at.x, y: at.y, w, h }]);
+  try {
+    await ghostDwell();
+    let id: TLShapeId | null = null;
+    editor.run(() => {
+      createTableFromMarkdown(editor, parsed, { x: at.x, y: at.y }, w);
+      const selected = editor.getSelectedShapeIds()[0];
+      if (selected) id = selected;
+    });
+    if (!id) throw new Error('the table block was not created');
+    return {
+      created: id,
+      x: round(at.x),
+      y: round(at.y),
+      w: round(w),
+      h: round(h),
+    };
+  } finally {
+    useAiGhostStore.getState().remove(ghost);
+  }
+}
+
+const CARD_VARIANTS = new Set(['note', 'info', 'tip', 'success', 'warning', 'danger']);
+const CARD_ICONS = new Set([
+  'dot', 'info', 'tip', 'success', 'warning', 'danger', 'pin', 'star', 'bookmark', 'zap', 'help',
+]);
+const CARD_DEFAULT_ICON: Record<string, string> = {
+  note: 'dot',
+  info: 'info',
+  tip: 'tip',
+  success: 'success',
+  warning: 'warning',
+  danger: 'danger',
+};
+
+async function createCard(deps: AiExecutorDeps, args: ToolArgs): Promise<ToolValue> {
+  const editor = deps.editor;
+  const title = requiredText(args, 'title');
+  const body = typeof args.body === 'string' ? args.body : '';
+  const variant = typeof args.variant === 'string' && CARD_VARIANTS.has(args.variant) ? args.variant : 'note';
+  const badge = typeof args.badge === 'string' ? args.badge.trim() : '';
+  const icon =
+    typeof args.icon === 'string' && CARD_ICONS.has(args.icon)
+      ? args.icon
+      : (CARD_DEFAULT_ICON[variant] ?? 'dot');
+  const w = widthArg(args, 220, 1200, 460);
+  const h = clamp(textLines(body) * 26 + (badge ? 92 : 64), 64, 1200);
+  const at = planPlacement(editor, deps, args, w, Math.min(h, 320));
+  const id = newShapeId();
+  // Placement plans against the visible cap (320); the glow mirrors that.
+  const ghost = useAiGhostStore.getState().push([{ x: at.x, y: at.y, w, h: Math.min(h, 320) }]);
+  try {
+    await ghostDwell();
+    editor.run(() => {
+      editor.createShape({
+        id,
+        type: 'callout-card',
+        x: at.x,
+        y: at.y,
+        props: {
+          w,
+          h,
+          variant,
+          icon,
+          title: buildRichDocument(title) as never,
+          badge: buildRichDocument(badge) as never,
+          body: buildRichDocument(body) as never,
+          showIcon: true,
+          showBadge: Boolean(badge),
+          tinted: false,
+          collapsed: false,
+        },
+      });
+    });
+  } finally {
+    useAiGhostStore.getState().remove(ghost);
+  }
+  return { created: id, variant, icon, x: round(at.x), y: round(at.y), w: round(w), h: round(h) };
+}
+
+async function createSvg(deps: AiExecutorDeps, args: ToolArgs): Promise<ToolValue> {  const editor = deps.editor;
+  const svg = requiredText(args, 'svg');
+  const name = typeof args.name === 'string' ? args.name : '';
+  const prepared = prepareSvg(svg);
+  if (!prepared) {
+    throw new Error('invalid svg: needs a viewBox, or width and height');
+  }
+  const w = widthArg(args, 120, 2000, 320);
+  const h = Math.round(w * prepared.ratio);
+  const at = planPlacement(editor, deps, args, w, h);
+  const id = newShapeId();
+  // The svg's own viewBox ratio is exactly what the ghost should glow at.
+  const ghost = useAiGhostStore.getState().push([{ x: at.x, y: at.y, w, h }]);
+  try {
+    await ghostDwell();
+    editor.run(() => {
+      editor.createShape({
+        id,
+        type: 'svg-diagram',
+        x: at.x,
+        y: at.y,
+        props: { svg: prepared.svg, ratio: prepared.ratio, draft: svg.trim(), h },
+      });
+    });
+  } finally {
+    useAiGhostStore.getState().remove(ghost);
+  }
+  return { created: id, name: name || null, x: round(at.x), y: round(at.y), w: round(w), h: round(h) };
+}
+
+/** tldraw geo values for the schema's simple node kinds. */
+const GEO_KINDS = { rect: 'rectangle', round: 'roundRectangle', diamond: 'diamond' } as const;
+
+async function createDiagram(deps: AiExecutorDeps, args: ToolArgs): Promise<ToolValue> {
+  const editor = deps.editor;
+  const rawNodes = asArray(args, 'nodes');
+  const rawEdges = args.edges;
+  if (!Array.isArray(rawEdges)) {
+    throw new Error('"edges" must be an array');
+  }
+  const nodes = rawNodes.map((node) => ({
+    id: typeof node.id === 'string' ? node.id : '',
+    label: typeof node.label === 'string' ? node.label : '',
+    shape: asScheme(node.shape),
+  }));
+  const ids = new Set(nodes.map((node) => node.id));
+  if (nodes.some((node) => node.id.length === 0)) {
+    throw new Error('every node needs a non-empty "id"');
+  }
+  if (ids.size !== nodes.length) {
+    throw new Error('node ids must be unique');
+  }
+  const edges = (rawEdges as ToolArgs[]).map((edge) => ({
+    from: typeof edge.from === 'string' ? edge.from : '',
+    to: typeof edge.to === 'string' ? edge.to : '',
+    label: typeof edge.label === 'string' ? edge.label : undefined,
+  }));
+
+  const layout = layoutDiagram(nodes, edges, args.direction === 'right' ? 'right' : 'down', { x: 0, y: 0 });
+  if (layout.nodes.size === 0) {
+    throw new Error('nothing to create: the diagram is empty');
+  }
+
+  // The diagram's own bounding box feeds the same deterministic placement
+  // rule as every other block: below (or left/right/above of) the content.
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const placement of layout.nodes.values()) {
+    minX = Math.min(minX, placement.x);
+    minY = Math.min(minY, placement.y);
+    maxX = Math.max(maxX, placement.x + placement.w);
+    maxY = Math.max(maxY, placement.y + placement.h);
+  }
+  const boxW = maxX - minX;
+  const boxH = maxY - minY;
+  const at = planPlacement(editor, deps, args, Math.min(boxW, 2000), Math.min(boxH, 2000));
+  const dx = at.x - minX;
+  const dy = at.y - minY;
+  // Ghost first: the exact diagram box glows where the creation compute
+  // already placed it, then the real shapes replace it after the beat.
+  const ghostId = useAiGhostStore.getState().push([
+    { x: at.x, y: at.y, w: Math.min(boxW, 2000), h: Math.min(boxH, 2000) },
+  ]);
+  try {
+    await ghostDwell();
+    const createdNodes: TLShapeId[] = [];
+    const createdArrows: TLShapeId[] = [];
+    editor.run(() => {
+    for (const node of nodes) {
+      const placement = layout.nodes.get(node.id)!;
+      const scaleFactor = node.shape === 'diamond' ? 1.25 : 1;
+      const w = placement.w * scaleFactor;
+      const h = placement.h * scaleFactor;
+      const id = newShapeId();
+      if (node.shape === 'note') {
+        editor.createShape({
+          id,
+          type: 'note',
+          x: placement.x + dx,
+          y: placement.y + dy,
+          props: { richText: toRichText(node.label) },
+        });
+      } else {
+        editor.createShape({
+          id,
+          type: 'geo',
+          x: placement.x + dx,
+          y: placement.y + dy,
+          props: {
+            geo: GEO_KINDS[node.shape],
+            w,
+            h,
+            richText: toRichText(node.label),
+          },
+        });
+      }
+      createdNodes.push(id);
+    }
+    for (const arrow of layout.arrows) {
+      const id = newShapeId();
+      editor.createShape({
+        id,
+        type: 'arrow',
+        x: 0,
+        y: 0,
+        props: {
+          start: { x: 0, y: 0, boundShapeId: arrow.from as TLShapeId },
+          end: { x: 100, y: 100, boundShapeId: arrow.to as TLShapeId },
+          text: arrow.label ?? undefined,
+        },
+      });
+      // Belt and braces: if tldraw didn't create the bindings from the
+      // props, make them explicitly.
+      const bindings = editor.getBindingsFromShape(id, 'arrow');
+      for (const endpoint of [arrow.from, arrow.to]) {
+        if (!bindings.some((binding) => binding.toId === endpoint)) {
+          editor.createBinding({
+            fromId: id,
+            toId: endpoint as TLShapeId,
+            type: 'arrow',
+          });
+        }
+      }
+      createdArrows.push(id);
+    }
+  });
+    return {
+      created: { nodes: createdNodes, arrows: createdArrows },
+      shape_ids: createdNodes,
+      x: round(at.x),
+      y: round(at.y),
+      w: round(boxW),
+      h: round(boxH),
+      warnings: layout.warnings,
+    };
+  } finally {
+    useAiGhostStore.getState().remove(ghostId);
+  }
+}
+
+/** convert_selection: swap the user's selection for a flow diagram the model
+ *  designed from its content. The selection is re-read live here — the model
+ *  never names the shapes it may delete — the diagram is built by the exact
+ *  create_diagram path (validation, layout, placement), pinned to the
+ *  selection's top-left, and only then are the originals removed. Nothing is
+ *  lost if the model's diagram arg is invalid: an error raises before any
+ *  edit happens. Destructive, mirroring delete_shapes: MCP callers confirm
+ *  inside their own conversation; the assistant confirms in the app card. */
+async function convertSelection(deps: AiExecutorDeps, args: ToolArgs): Promise<ToolValue> {
+  const editor = deps.editor;
+  const selected = [...editor.getSelectedShapeIds()].map(String);
+  if (selected.length === 0) {
+    throw new Error('nothing is selected: the user must select shapes on the canvas to convert them');
+  }
+
+  if (
+    deps.origin === 'mcp' &&
+    args.confirmed !== true &&
+    deps.destructivePolicy() !== 'auto_confirm'
+  ) {
+    return {
+      status: 'requires_confirmation',
+      count: selected.length,
+      prompt:
+        `Convert ${selected.length} selected shape(s) into a diagram? The originals are deleted. ` +
+        'Re-send convert_selection with the same nodes/edges and "confirmed": true.',
+    };
+  }
+  const approved =
+    deps.origin === 'assistant'
+      ? deps.confirm(
+          'Convert selection?',
+          selected.length === 1
+            ? 'The selected shape becomes a flow diagram — the original is removed.'
+            : `The ${selected.length} selected shapes become one flow diagram — the originals are removed.`,
+        )
+      : Promise.resolve(true);
+  if (!(await approved)) {
+    throw new Error('convert cancelled by the user');
+  }
+
+  // The diagram takes the selection's place: pin x/y to the selection's
+  // top-left. create_diagram honors explicit x/y exactly (planning skipped),
+  // so the new diagram appears where the old content stood.
+  let x: number | undefined;
+  let y: number | undefined;
+  for (const id of selected) {
+    const bounds = editor.getShapePageBounds(id as TLShapeId);
+    if (bounds) {
+      x = x === undefined ? bounds.x : Math.min(x, bounds.x);
+      y = y === undefined ? bounds.y : Math.min(y, bounds.y);
+    }
+  }
+  const pinned: ToolArgs = x === undefined ? args : { ...args, x, y };
+
+  // The whole converted area shimmers from here through the swap: each
+  // selected shape glows ON itself ("this stuff is being transformed") while
+  // the diagram is built (its own, same-art ghost glows among them with the
+  // new diagram's aspect ratio), and the glow only dissolves after the
+  // originals are gone.
+  const glow = perShapeBoxes(editor, selected.map((id) => id as TLShapeId));
+  const selectionGhost = glow.length > 0
+    ? useAiGhostStore.getState().push(glow.map((box) => ({ kind: 'edit' as const, ...box })))
+    : null;
+  try {
+    const created = await createDiagram(deps, pinned);
+
+    // Success is the delete trigger. Ids re-checked: anything the user
+    // removed mid-turn is skipped rather than resurrecting an error.
+    const stale = selected.filter((id) => !!editor.getShape(id as TLShapeId));
+    if (stale.length > 0) {
+      editor.run(() => {
+        editor.deleteShapes(stale.map((id) => id as TLShapeId));
+      });
+    }
+    return { ...created, deleted: stale };
+  } finally {
+    if (selectionGhost) useAiGhostStore.getState().remove(selectionGhost);
+  }
+}
+
+/** Rough planned footprint for one create_shapes entry. Placement only —
+ *  blocks auto-fit their real height right after creation (geo carries its
+ *  real w/h in props; that is validated before this runs). */
+function plannedSize(type: string, props: ToolArgs): { w: number; h: number } {
+  const w = typeof props.w === 'number' && Number.isFinite(props.w) ? props.w : 0;
+  const h = typeof props.h === 'number' && Number.isFinite(props.h) ? props.h : 0;
+  if (w > 0 && h > 0) return { w, h };
+  const text = typeof props.text === 'string' ? props.text : '';
+  switch (type) {
+    case 'text':
+      return { w: 240, h: Math.max(42, textLines(text) * 36 + 6) };
+    case 'frame':
+      return { w: 480, h: 360 };
+    case 'arrow':
+    case 'line':
+      return { w: 180, h: 32 };
+    case 'svg-diagram':
+      return { w: 320, h: 240 };
+    default:
+      return { w: 120, h: 120 };
+  }
+}
+
+/** An entry position set by the model itself (honored exactly, no planning).
+ *  A guard, so callers get `x`/`y` narrowed to numbers after the check. */
+const hasExplicitXY = (entry: ToolArgs): entry is ToolArgs & { x: number; y: number } =>
+  typeof entry.x === 'number' && Number.isFinite(entry.x) &&
+  typeof entry.y === 'number' && Number.isFinite(entry.y);
+
+async function createShapes(deps: AiExecutorDeps, args: ToolArgs): Promise<ToolValue> {
+  const editor = deps.editor;
+  const entries: ToolArgs[] = asArray(args, 'shapes');
+
+  // Validate before any placement math, with the exact messages the
+  // executor has always produced (per-entry, prefixed by the batch index).
+  const errors: string[] = [];
+  const ok: Array<{ entry: ToolArgs; index: number; type: string; size: { w: number; h: number } }> = [];
+  entries.forEach((entry, index) => {
+    const type = entry.type;
+    if (typeof type !== 'string' || !CREATE_TYPES.has(type)) {
+      errors.push(`shape ${index}: type must be one of: ${[...CREATE_TYPES].join(', ')}`);
+      return;
+    }
+    const props = entry.props && typeof entry.props === 'object' ? (entry.props as ToolArgs) : {};
+    if (type === 'geo' && (typeof props.w !== 'number' || typeof props.h !== 'number')) {
+      errors.push(`shape ${index}: geo shapes need numeric "w" and "h"`);
+      return;
+    }
+    ok.push({ entry, index, type, size: plannedSize(type, props) });
+  });
+
+  // x/y-less entries used to drop at world origin — off-sheet in pages mode.
+  // They now get the dedicated create_* tools' contract: one column anchored
+  // by planPlacement (below existing content, side-honored) and clamped into
+  // the compose region, keeping the batch's relative offsets.
+  let cursor: { x: number; y: number } | null = null;
+  if (ok.some((it) => !hasExplicitXY(it.entry))) {
+    const batchW = Math.max(...ok.map((it) => it.size.w));
+    const batchH = ok.reduce((sum, it) => sum + it.size.h + LAYOUT_GAP, -LAYOUT_GAP);
+    const anchor = planPlacement(editor, deps, args, batchW, batchH);
+    cursor = { x: anchor.x, y: anchor.y };
+  }
+
+  // Positions are resolved BEFORE any editor write: the ghost layer needs
+  // the batch's exact final footprint, and the run loop just applies them.
+  const placements: Array<{ x: number; y: number }> = [];
+  for (const { entry, size } of ok) {
+    if (cursor === null) {
+      // Every entry is explicit: no planning touched the coordinates.
+      const x = typeof entry.x === 'number' && Number.isFinite(entry.x) ? entry.x : 0;
+      const y = typeof entry.y === 'number' && Number.isFinite(entry.y) ? entry.y : 0;
+      placements.push({ x, y });
+    } else if (hasExplicitXY(entry)) {
+      placements.push({ x: entry.x, y: entry.y });
+    } else {
+      placements.push({ x: cursor.x, y: cursor.y });
+      cursor.y += size.h + LAYOUT_GAP;
+    }
+  }
+
+  const created: string[] = [];
+  if (placements.length > 0) {
+    // One glow per planned entry: each box carries the aspect ratio the
+    // model sized it with (the layer scales to screen; only the ratio
+    // matters). Committed as one batch so remove/clear stay atomic.
+    const ghostId = useAiGhostStore.getState().push(
+      placements.map((p, i) => ({ x: p.x, y: p.y, w: ok[i].size.w, h: ok[i].size.h })),
+    );
+    try {
+      await ghostDwell();
+      editor.run(() => {
+        for (const [placeIndex, { entry, index, type }] of ok.entries()) {
+          try {
+            const id = typeof entry.id === 'string' && entry.id.startsWith('shape:')
+              ? (entry.id as TLShapeId)
+              : newShapeId();
+            const { x, y } = placements[placeIndex];
+            editor.createShape({ id, type, x, y, props: entry.props && typeof entry.props === 'object' ? entry.props : {} } as Parameters<Editor['createShape']>[0]);
+            created.push(id);
+          } catch (error) {
+            errors.push(`shape ${index}: ${error instanceof Error ? error.message : String(error)}`);
+          }
+        }
+      });
+    } finally {
+      useAiGhostStore.getState().remove(ghostId);
+    }
+  }
+  if (created.length === 0 && errors.length > 0) {
+    throw new Error(errors[0]);
+  }
+  return { created, shape_ids: created, errors };
+}
+
+// ---------------------------------------------------------------------------
+// edits
+// ---------------------------------------------------------------------------
+
+/** Shape types whose geometry lives inside `props`. For these, top-level
+ *  `w`/`h` in an update entry are moved under `props` so the model never has
+ *  to remember where the size sits. */
+const BOX_PROP_TYPES = new Set([
+  'geo',
+  'frame',
+  'code-block',
+  'math-block',
+  'table',
+  'callout-card',
+  'svg-diagram',
+  'icon',
+]);
+
+/** update_shapes lays the shimmer on each shape it is about to change (the
+ *  user asked the AI to edit their selection — the shapes themselves are the
+ *  show). The glow wraps only the mutation: validation errors surface before
+ *  the dwell fires, so a rejected update never flashes a ghost. */
+async function updateShapes(editor: Editor, args: ToolArgs): Promise<ToolValue> {
+  const entries = asArray(args, 'updates');
+  const updated: string[] = [];
+  const errors: string[] = [];
+  const mutating = entries
+    .filter((entry) => typeof entry.id === 'string' && (entry.id as string).startsWith('shape:'))
+    .map((entry) => entry.id as TLShapeId);
+  const glow = mutating.length > 0 ? perShapeBoxes(editor, mutating) : [];
+  const ghost = glow.length > 0 ? useAiGhostStore.getState().push(glow.map((box) => ({ kind: 'edit' as const, ...box }))) : null;
+  try {
+    if (ghost) await ghostDwell();
+    editor.run(() => {
+      for (const [index, entry] of entries.entries()) {
+        try {
+          if (typeof entry.id !== 'string' || !entry.id.startsWith('shape:')) {
+            throw new Error('every update needs a shape "id"');
+          }
+          const shape = editor.getShape(entry.id as TLShapeId);
+          if (!shape) {
+            throw new Error(`no shape with id ${entry.id} on the active page`);
+          }
+          const { id, ...patch } = entry;
+          // Convenience: for box-shaped blocks sizes live under `props`; a
+          // top-level w/h is moved there instead of being silently ignored.
+          if (
+            BOX_PROP_TYPES.has(shape.type) &&
+            !(patch.props && typeof patch.props === 'object') &&
+            ('w' in patch || 'h' in patch)
+          ) {
+            patch.props = { w: patch.w, h: patch.h } as ToolArgs;
+            delete patch.w;
+            delete patch.h;
+          }
+          editor.updateShape({ id: id as TLShapeId, ...patch } as Parameters<Editor['updateShape']>[0]);
+          updated.push(id);
+        } catch (error) {
+          errors.push(`update ${index}: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
+    });
+  } finally {
+    if (ghost) useAiGhostStore.getState().remove(ghost);
+  }
+  if (updated.length === 0 && errors.length > 0) {
+    throw new Error(errors[0]);
+  }
+  return { updated, errors };
+}
+
+function deleteShapes(deps: AiExecutorDeps, args: ToolArgs): Promise<ToolValue> {
+  const editor = deps.editor;
+  const ids = args.ids;
+  if (!Array.isArray(ids) || ids.length === 0) {
+    throw new Error('"ids" must be a non-empty array of shape ids');
+  }
+  const existing = ids.filter(
+    (id): id is string => typeof id === 'string' && !!editor.getShape(id as TLShapeId),
+  );
+  if (existing.length === 0) {
+    throw new Error('none of the ids refer to a shape on the active page');
+  }
+
+  // Destructive confirmation lives with the caller, shaped by the
+  // destructive-policy setting. MCP-origin calls resolve it inside the
+  // client's own conversation: an unconfirmed call comes back as a
+  // structured result the client's model can act on (re-send with
+  // "confirmed": true) — and no dialog ever pops up on the desktop. With
+  // the "auto_confirm" policy (an explicit user choice in AI settings) the
+  // round-trip is skipped entirely and the call deletes immediately. The
+  // assistant ignores a model-supplied `confirmed`; its confirmation is the
+  // app's own card, so the model can never self-approve.
+  if (
+    deps.origin === 'mcp' &&
+    args.confirmed !== true &&
+    deps.destructivePolicy() !== 'auto_confirm'
+  ) {
+    return Promise.resolve({
+      status: 'requires_confirmation',
+      count: existing.length,
+      prompt: `Delete ${existing.length} shape(s) on this canvas? Re-send delete_shapes with the same ids and "confirmed": true to delete them.`,
+    });
+  }
+  const approved =
+    deps.origin === 'assistant'
+      ? confirmShapeDeletion(existing.length)
+      : Promise.resolve(true);
+  return approved.then(async (ok) => {
+    if (!ok) throw new Error('delete cancelled by the user');
+    // Each shape about to disappear shimmers ON itself for its beat first
+    // (the honest "this is being transformed away" signal), then the
+    // deletion lands.
+    const glow = perShapeBoxes(editor, existing.map((id) => id as TLShapeId));
+    const ghost = glow.length > 0
+      ? useAiGhostStore.getState().push(glow.map((box) => ({ kind: 'edit' as const, ...box })))
+      : null;
+    try {
+      if (ghost) await ghostDwell();
+      editor.run(() => {
+        editor.deleteShapes(existing.map((id) => id as TLShapeId));
+      });
+    } finally {
+      if (ghost) useAiGhostStore.getState().remove(ghost);
+    }
+    return { deleted: existing.map(String) } as ToolValue;
+  });
+}
+
+/** Structured decision request: the caller (an MCP client) surfaces this in
+ *  its own conversation and re-sends the call with the chosen input. Nothing
+ *  pops up on the desktop — this shape is the whole interaction. */
+function requiresInput(input: string, prompt: string, extra: ToolArgs): ToolValue {
+  return { status: 'requires_input', input, prompt, ...extra };
+}
+
+/** add_page: extend a topic's sheet stack on a page-type canvas. The topic
+ *  is a decision: several topics without an explicit choice return
+ *  `requires_input` with the options (id, name, sheet count, active flag) —
+ *  the client's model can show them to the user, and the model can also
+ *  decide itself and resend with `topic_id`. */
+async function addPage(deps: AiExecutorDeps, args: ToolArgs): Promise<ToolValue> {
+  const ctx = deps.context();
+  if (ctx.canvas_type !== 'page') {
+    throw new Error('add_page works on page-type canvases only (their topics are sheet stacks)');
+  }
+  const capability = deps.pages?.() ?? null;
+  if (!capability) {
+    throw new Error('this canvas shell does not expose page stacks');
+  }
+
+  const topics = capability.topics;
+  const requested =
+    typeof args.topic_id === 'string' && args.topic_id.trim() !== '' ? args.topic_id.trim() : null;
+
+  if (requested) {
+    const target = topics.find((t) => t.id === requested);
+    if (!target) {
+      const names = topics
+        .slice(0, 4)
+        .map((t) => `"${t.name}"`)
+        .join(', ');
+      throw new Error(
+        `no topic with id "${requested}" on this canvas` +
+          (topics.length
+            ? ` — topics are: ${names}${topics.length > 4 ? '…' : ''}`
+            : ' (no topics exist yet)'),
+      );
+    }
+    const created = await capability.addPage(requested);
+    return { created_page: created, topic: { id: target.id, name: target.name } };
+  }
+
+  if (topics.length === 0) {
+    throw new Error('this canvas has no topics yet — the user must create one first');
+  }
+  if (topics.length === 1) {
+    const created = await capability.addPage(topics[0].id);
+    return { created_page: created, topic: { id: topics[0].id, name: topics[0].name } };
+  }
+
+  // The decision lives with the caller (see the module contract above).
+  return requiresInput(
+    'topic_id',
+    'This canvas has several topics — which one gets the new page? Pick a topic_id from the list and re-send add_page with it.',
+    {
+      topics: topics.map((t) => ({
+        id: t.id,
+        name: t.name,
+        page_count: t.page_count,
+        ...(t.id === capability.active_topic_id ? { active: true } : {}),
+      })),
+    },
+  );
+}
+
+function focusViewport(editor: Editor, args: ToolArgs): ToolValue {
+  const requested = Array.isArray(args.shape_ids)
+    ? args.shape_ids.filter((id): id is string => typeof id === 'string')
+    : [];
+  if (requested.length === 0) {
+    editor.zoomToFit();
+    return { focused: 'all content' };
+  }
+  const ids = requested.filter((id) => editor.getShape(id as TLShapeId));
+  if (ids.length === 0) {
+    throw new Error('none of the ids refer to a shape on the active page');
+  }
+  let bounds = editor.getShapePageBounds(ids[0] as TLShapeId)!.clone();
+  for (const id of ids.slice(1)) {
+    const next = editor.getShapePageBounds(id as TLShapeId);
+    if (next) bounds.expand(next);
+  }
+  editor.zoomToBounds(bounds, { inset: 80, animation: { duration: 220 } });
+  return { focused: ids.map(String) };
+}

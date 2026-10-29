@@ -19,6 +19,10 @@ base64.workspace = true
 rand.workspace = true
 sha2.workspace = true
 url.workspace = true
+# AI tool registry: JSON Schemas for every tool's arguments
+schemars.workspace = true
+# AI agent loop: OpenAI-compatible chat completions client
+async-openai.workspace = true
 keyring = { workspace = true, optional = true }
 
 [features]

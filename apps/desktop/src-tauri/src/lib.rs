@@ -1,7 +1,18 @@
 use note_core::{repo, Chapter, ChapterCanvas, Notebook, PagePreset, Topic, TopicPage, UiPreset};
 use sqlx::SqlitePool;
-use tauri::Manager;
-use tauri::State;
+use tauri::{Manager, State, WebviewWindow};
+
+mod ai_bridge;
+mod ai_commands;
+mod ai_mcp;
+mod icons;
+
+// Tauri's generate_handler! needs the command wrappers in this scope.
+use ai_commands::{
+    ai_cancel_turn, ai_chat, canvas_result, clear_api_key, get_ai_config, get_mcp_connection_info,
+    has_api_key, list_tool_names, rotate_mcp_token, set_active_canvas, set_ai_config, set_api_key,
+};
+use icons::{icon_search, icon_set_data};
 
 type R<T> = Result<T, String>;
 
@@ -615,6 +626,78 @@ async fn ping() -> R<String> {
     note_core::ping().await.map_err(map)
 }
 
+// =========================
+// Native window caption panel (tauri-plugin-decoration)
+// =========================
+
+// adds activate_decoration / restore_decoration / set_traffic_lights_inset
+use tauri_plugin_decoration::WebviewWindowExt;
+
+async fn restore_and_show(
+    window: &WebviewWindow,
+    activation_error: impl std::fmt::Display,
+) -> Result<&'static str, String> {
+    let restore_error = window.restore_decoration().await.err();
+    let show_error = window.show().err();
+
+    match (restore_error, show_error) {
+        (None, None) => Ok("native"),
+        (Some(restore), None) => Err(format!(
+            "custom decoration failed ({activation_error}); native restoration failed ({restore}), but the window was revealed"
+        )),
+        (None, Some(show)) => Err(format!(
+            "custom decoration failed ({activation_error}); native fallback could not be revealed ({show})"
+        )),
+        (Some(restore), Some(show)) => Err(format!(
+            "custom decoration failed ({activation_error}); native restoration failed ({restore}); revealing the fallback also failed ({show})"
+        )),
+    }
+}
+
+/// Called by the frontend after mount: swaps the native frame for the
+/// embedded caption panel and reveals the (initially hidden) window. Falls
+/// back to the plain native titlebar only after backoff retries — at cold
+/// boot the one-shot activation sometimes loses an internal race, and the
+/// same call succeeds right after (that used to leave the default header
+/// in place until the user refreshed the page).
+#[tauri::command]
+async fn activate_and_show(window: WebviewWindow) -> Result<&'static str, String> {
+    let mut last_error = String::from("activation failed");
+    for attempt in 0..5u32 {
+        match window.activate_decoration().await {
+            Ok(()) => {
+                if let Err(error) = set_traffic_lights_inset(&window).await {
+                    last_error = error;
+                } else if let Err(error) = window.show() {
+                    last_error = error.to_string();
+                } else {
+                    return Ok("custom");
+                }
+            }
+            Err(error) => last_error = error.to_string(),
+        }
+        if attempt < 4 {
+            tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        }
+    }
+    restore_and_show(&window, last_error).await
+}
+
+/// One activation step's macOS traffic-light positioning; a no-op platform
+/// elsewhere (kept as cfg'd helpers so the retry loop stays cfg-free).
+#[cfg(target_os = "macos")]
+async fn set_traffic_lights_inset(window: &WebviewWindow) -> Result<(), String> {
+    window
+        .set_traffic_lights_inset(16.0, 20.0)
+        .await
+        .map_err(|error| format!("traffic lights: {error}"))
+}
+
+#[cfg(not(target_os = "macos"))]
+async fn set_traffic_lights_inset(_window: &WebviewWindow) -> Result<(), String> {
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // development convenience: picks up the repo-root .env (searches cwd and
@@ -622,6 +705,8 @@ pub fn run() {
     dotenvy::dotenv().ok();
 
     tauri::Builder::default()
+        // window chrome: must register before any webview is created
+        .plugin(tauri_plugin_decoration::init())
         .plugin(tauri_plugin_sql::Builder::default().build())
         .setup(|app| {
             let pool = tauri::async_runtime::block_on(async {
@@ -637,9 +722,21 @@ pub fn run() {
                 let store = backup::keyring_store::KeyringTokenStore::new(scheduler_pool.clone());
                 backup::scheduler_loop(scheduler_pool, std::sync::Arc::new(store)).await;
             });
+
+            // AI: the canvas bridge + the local MCP server both live here.
+            let bridge = std::sync::Arc::new(ai_bridge::DesktopBridge::new(
+                app.handle().clone(),
+            ));
+            app.manage(bridge.clone());
+            let shared = std::sync::Arc::new(ai_mcp::ArcMcpShared {
+                pool: pool.clone(),
+                bridge,
+            });
+            tauri::async_runtime::spawn(ai_mcp::run(app.handle().clone(), shared));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            activate_and_show,
             ping,
             create_notebook,
             list_notebooks,
@@ -680,6 +777,20 @@ pub fn run() {
             backup_status,
             drive_backup_info,
             import_backup,
+            set_active_canvas,
+            get_ai_config,
+            set_ai_config,
+            set_api_key,
+            has_api_key,
+            clear_api_key,
+            list_tool_names,
+            get_mcp_connection_info,
+            rotate_mcp_token,
+            ai_chat,
+            ai_cancel_turn,
+            canvas_result,
+            icon_search,
+            icon_set_data,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

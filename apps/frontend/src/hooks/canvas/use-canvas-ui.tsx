@@ -9,6 +9,7 @@ import {
 } from 'tldraw';
 import { ContextualStylePanel } from '@/features/canvas/components/contextual-style-panel';
 import { CanvasRichTextToolbar } from '@/features/canvas/canvas-rich-text-toolbar';
+import { MainMenuContentWithPdf } from '@/components/global/canvas/ExportAsMenu';
 import { PortalSlot } from '@/features/canvas/components/portal-slot';
 import { RICH_TEXT_EXTENSIONS } from '@/features/canvas/rich-text-setup';
 import { StableContextMenu } from '@/components/global/canvas/StableContextMenu';
@@ -69,7 +70,11 @@ export function useCanvasUi({
       MenuPanel: () => (
         <>
           <PortalSlot slotRef={mainMenuSlotRef}>
-            <DefaultMainMenu />
+            <DefaultMainMenu>
+              {/* stock content with the PDF row inside the stock
+                  "Export as" submenu (see ExportAsMenu) */}
+              <MainMenuContentWithPdf />
+            </DefaultMainMenu>
           </PortalSlot>
           <PortalSlot slotRef={pageMenuSlotRef}>
             <DefaultPageMenu />

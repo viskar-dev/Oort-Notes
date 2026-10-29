@@ -1,9 +1,11 @@
-import { Plus } from 'lucide-react';
+import { PanelLeftClose, Plus } from 'lucide-react';
 import { ChapterRow } from './ChapterRow';
 import type { Chapter } from '@/lib/ipc';
 
-/** The sidebar panel: the chapter list (with the selection bar), the count
- *  badge and the "New chapter" button. */
+/** The left column of the notebook screen: hover-revealed "New chapter" and
+ *  collapse actions in the header block, then the plain chapter rows (each
+ *  h-11, packed without margins). Purely a skin — selection and dialogs stay
+ *  with the page. */
 export function ChaptersPanel({
   items,
   selectedId,
@@ -12,6 +14,7 @@ export function ChaptersPanel({
   onCreate,
   onRename,
   onDelete,
+  onCollapse,
 }: {
   items: Chapter[] | null;
   selectedId: string | null;
@@ -20,30 +23,45 @@ export function ChaptersPanel({
   onCreate: () => void;
   onRename: (chapter: Chapter) => void;
   onDelete: (chapter: Chapter) => void;
+  /** Collapses the chapters column (presentational toggle owned by the page). */
+  onCollapse?: () => void;
 }) {
   return (
-    <aside className="w-[280px] shrink-0 rounded-xl border border-[#24232c] bg-[#111016]">
-      <div className="flex items-center justify-between px-4 py-3.5">
-        <div className="flex items-center gap-2">
-          <span className="text-sm font-semibold text-[#f4f4f6]">Chapters</span>
-          {items && (
-            <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-[#17161c] px-1.5 text-[11px] text-[#8b8a96]">
-              {items.length}
-            </span>
+    <aside className="group/panel w-full">
+      {/* header block: both columns use the same h-20 so their first rows align */}
+      <div className="flex h-20 items-center justify-between">
+        <div className="flex items-baseline gap-2">
+          <h2 className="text-sm font-medium text-fg-1">Chapters</h2>
+          {items && <span className="text-xs text-fg-3 tabular-nums">{items.length}</span>}
+        </div>
+        <div className="flex items-center gap-1 opacity-0 pointer-events-none transition-opacity duration-100 group-hover/panel:pointer-events-auto group-hover/panel:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 pointer-coarse:pointer-events-auto pointer-coarse:opacity-100">
+          <button
+            onClick={onCreate}
+            aria-label="New chapter"
+            title="New chapter"
+            className="flex h-7 w-7 items-center justify-center rounded-lg text-fg-3 transition-colors duration-150 hover:bg-white/[0.04] hover:text-fg-1"
+          >
+            <Plus className="h-3.5 w-3.5" strokeWidth={1.5} />
+          </button>
+          {onCollapse && (
+            <button
+              onClick={onCollapse}
+              aria-label="Collapse sidebar"
+              title="Collapse sidebar"
+              className="flex h-7 w-7 items-center justify-center rounded-lg text-fg-3 transition-colors duration-150 hover:bg-white/[0.04] hover:text-fg-1"
+            >
+              <PanelLeftClose className="h-3.5 w-3.5" strokeWidth={1.5} />
+            </button>
           )}
         </div>
-        <button
-          onClick={onCreate}
-          className="flex h-8 items-center gap-1.5 rounded-lg border border-[#24232c] bg-[#17161c] px-2.5 text-[13px] text-[#f4f4f6] transition-colors hover:bg-[#1c1b22]"
-        >
-          <Plus className="h-3.5 w-3.5 text-[#a09fab]" /> New chapter
-        </button>
       </div>
 
-      <div className="px-2 pb-2">
-        {items === null && <p className="px-3 py-6 text-sm text-[#8b8a96]">Loading…</p>}
+      {/* rows: packed without margins; the wrapper has no horizontal padding so
+          the rows' -mx bleed keeps hover fills soft against the column edge */}
+      <div className="flex flex-col pb-4 pt-4">
+        {items === null && <p className="px-2.5 py-6 text-sm text-fg-3">Loading…</p>}
         {items?.length === 0 && (
-          <p className="px-3 py-6 text-sm text-[#8b8a96]">
+          <p className="px-2.5 py-6 text-sm text-fg-3">
             {hasSearch ? 'No matches' : 'No chapters yet'}
           </p>
         )}

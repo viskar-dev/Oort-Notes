@@ -10,9 +10,11 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import { Trash2 } from 'lucide-react';
+import { Plus, Trash2 } from 'lucide-react';
 import { api, type UiPreset } from '@/lib/ipc';
 import { SettingsLayout } from '@/components/layout/settings-layout';
+import { errorText } from '@/lib/utils';
+import { toast } from 'sonner';
 
 /** Route: '/settings'. Presets section of the settings shell. */
 export function SettingsPage() {
@@ -41,8 +43,9 @@ export function SettingsPage() {
       await api.deleteUiPreset(preset.id);
       setDeleting(null);
       setReloadKey((k) => k + 1);
+      toast.success('Preset deleted', { description: preset.name });
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      toast.error('Could not delete preset', { description: errorText(e) });
     }
   }
 
@@ -52,7 +55,7 @@ export function SettingsPage() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Presets</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Create canvas presets — toolbar, colors, fonts, sizes — and apply
+            Create canvas presets toolbar, colors, fonts, sizes and apply
             them when creating chapters.
           </p>
         </div>
@@ -60,7 +63,7 @@ export function SettingsPage() {
           to="/settings/presets/new"
           className="flex shrink-0 items-center gap-1.5 rounded-lg bg-primary px-3.5 py-2 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90"
         >
-          + New preset
+          <Plus/> New preset
         </Link>
       </header>
 

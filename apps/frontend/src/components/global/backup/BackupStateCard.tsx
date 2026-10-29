@@ -2,8 +2,9 @@ import { CheckCircle2, CloudUpload, RefreshCw } from 'lucide-react';
 import type { BackupSettings, BackupStatus } from '@/lib/ipc';
 import { whenAgo } from './backup-format';
 
-/** "Your backup": either a green up-to-date row or the one action that gets
- *  the workspace backed up. */
+/** Backup state row, merged into the Google Drive section: either a green
+ *  up-to-date indicator or the one action that gets the workspace backed
+ *  up. Renders bare (no section frame) so the page owns the layout. */
 export function BackupStateCard({
   connected,
   backupState,
@@ -21,46 +22,38 @@ export function BackupStateCard({
   const needsBackup = backupState !== null && !workspaceEmpty && backupState.dirty;
   const upToDate = backupState !== null && !workspaceEmpty && !backupState.dirty;
 
+  if (!connected) return null;
+
   return (
-    <section className="mb-4 rounded-xl border border-line bg-surface px-5 py-4">
-      <div className="flex items-center justify-between gap-4">
-        <div className="min-w-0">
-          <div className="text-sm font-semibold">Your backup</div>
-          <div className="mt-0.5 text-xs text-muted-foreground">
-            {!connected && 'Connect Google Drive and your workspace is kept up to date automatically.'}
-            {connected && backupState === null && 'Checking…'}
-            {connected &&
-              workspaceEmpty &&
-              'Nothing to back up yet — it starts as soon as you create your first notebook.'}
-            {connected && needsBackup && 'New changes since your last backup.'}
-            {connected &&
-              upToDate &&
-              `Backed up ${
-                settings?.last_backup_at ? whenAgo(settings.last_backup_at) : 'just now'
-              } — everything is up to date.`}
-          </div>
-        </div>
-        <div className="flex shrink-0 items-center gap-3">
-          {connected && upToDate && (
-            <CheckCircle2 className="h-5 w-5 text-emerald-400" aria-hidden />
-          )}
-          {connected && needsBackup && (
-            <button
-              onClick={onBackup}
-              disabled={busy !== null}
-              title="Update the backup in your Google Drive"
-              className="flex items-center gap-1.5 rounded-lg bg-primary px-3.5 py-2 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-40"
-            >
-              {busy === 'backup' ? (
-                <RefreshCw className="h-4 w-4 animate-spin" />
-              ) : (
-                <CloudUpload className="h-4 w-4" />
-              )}
-              {busy === 'backup' ? 'Backing up…' : 'Back up now'}
-            </button>
-          )}
-        </div>
+    <div className="mt-3 flex items-center justify-between gap-4">
+      <div className="flex min-w-0 items-center gap-2 text-[13px] text-muted-foreground">
+        {upToDate && <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-400" aria-hidden />}
+        <span className="truncate">
+          {backupState === null && 'Checking…'}
+          {workspaceEmpty &&
+            'Nothing to back up yet — it starts as soon as you create your first notebook.'}
+          {needsBackup && 'New changes since your last backup.'}
+          {upToDate &&
+            `Backed up ${
+              settings?.last_backup_at ? whenAgo(settings.last_backup_at) : 'just now'
+            }`}
+        </span>
       </div>
-    </section>
+      {needsBackup && (
+        <button
+          onClick={onBackup}
+          disabled={busy !== null}
+          title="Update the backup in your Google Drive"
+          className="flex h-8 shrink-0 items-center gap-2 rounded-md bg-primary px-4 text-[13px] font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-40"
+        >
+          {busy === 'backup' ? (
+            <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <CloudUpload className="h-3.5 w-3.5" />
+          )}
+          {busy === 'backup' ? 'Backing up…' : 'Back up now'}
+        </button>
+      )}
+    </div>
   );
 }

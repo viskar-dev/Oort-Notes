@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import { ChevronLeft, ChevronRight, Plus } from 'lucide-react';
 import { Tldraw } from 'tldraw';
 import { CodeBlockUtil } from '@/features/canvas/code-block/code-block-shape';
 import { SvgDiagramUtil } from '@/features/canvas/svg-diagram/svg-diagram-shape';
@@ -15,6 +16,12 @@ import { useIconFinderStore } from '@/stores/icon-finder-store';
 import { PageFrameStack } from '@/features/canvas/components/page-frame-stack';
 import { ViewModeContext } from '@/features/canvas/view-mode';
 import { CanvasTopBar } from '@/features/canvas/components/canvas-top-bar';
+import { AiChatPanel, AiConfirmCard } from '@/features/ai/components/ai-chat-panel';
+import { useAiStore } from '@/features/ai/ai-store';
+import { AiCanvasPrompt } from '@/features/ai/components/ai-canvas-prompt';
+import { AiGhostLayer } from '@/features/ai/components/ai-ghost-layer';
+import { useAiBridge } from '@/features/ai/use-ai-bridge';
+import { AiBusyPill } from '@/features/ai/components/ai-busy-pill';
 import { ZoomSlotContext } from '@/components/global/canvas/PresetToolbar';
 import { CanvasSettingsCard } from '@/components/global/canvas/CanvasSettingsCard';
 import { ViewModeHint } from '@/components/global/canvas/ViewModeHint';
@@ -23,6 +30,7 @@ import { useChapterPreset } from '@/hooks/canvas/use-chapter-preset';
 import { usePageView } from '@/hooks/canvas/use-page-view';
 import { useCanvasUi } from '@/hooks/canvas/use-canvas-ui';
 import type { Chapter, Notebook } from '@/lib/ipc';
+import { isTauri } from '@tauri-apps/api/core';
 
 /** The mounted canvas: top bar, tldraw editor and its slots. Pure composition
  *  — data and behavior come from hooks/features. */
@@ -70,11 +78,34 @@ export function CanvasShell({ notebook, chapter }: { notebook: Notebook; chapter
     refit,
     goToSheet,
     addSheet,
+    aiPages,
     getEditor,
   } = useChapterCanvas(chapter, paddingRef, deeplink, insetRef);
 
   const isPageChapter = chapter.canvas_type === 'page';
   const activeTopic = topics.find((t) => t.id === activeTopicId) ?? null;
+
+  // AI bridge: desktop only — pins this chapter as the AI's canvas and
+  // answers the backend's `canvas:call` tool invocations. The context makes
+  // pages-mode geometry (sheet size/count) visible to the tool executors;
+  // the pages capability lets `add_page` extend the sheet stacks.
+  useAiBridge(
+    chapter.id,
+    getEditor,
+    () => ({
+      canvas_type: chapter.canvas_type,
+      page:
+        isPageChapter && chapter.page_width && chapter.page_height
+          ? {
+              width: chapter.page_width,
+              height: chapter.page_height,
+              gap: SHEET_GAP,
+              count: activePages.length,
+            }
+          : null,
+    }),
+    aiPages,
+  );
 
   const pageView = usePageView({
     chapter,
@@ -145,6 +176,48 @@ export function CanvasShell({ notebook, chapter }: { notebook: Notebook; chapter
     return () => window.removeEventListener('keydown', onKey, true);
   }, [getEditor, pageView.viewMode, settingsOpen]);
 
+  // page view mode: page chapters only. Capture phase +
+  // stopPropagation so tldraw never sees it; typing contexts stay untouched,
+  // and the combo also works while IN view mode (whose header is hidden) to
+  // exit back — mirrors the Icon finder handler above, including the
+  // AltGr-safe `e.code` match.
+  useEffect(() => {
+    if (!isPageChapter) return;
+    const onKey = (e: KeyboardEvent) => {
+      const isV = e.code === 'KeyV' || e.key.toLowerCase() === 'v';
+      if (!isV || !(e.ctrlKey || e.metaKey) || !e.altKey || e.shiftKey) return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
+      const ed = getEditor();
+      if (!ed || (!pageView.viewMode && (settingsOpen || ed.getEditingShapeId()))) return;
+      e.preventDefault();
+      e.stopPropagation();
+      pageView.toggleViewMode();
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [isPageChapter, getEditor, pageView.viewMode, pageView.toggleViewMode, settingsOpen]);
+
+  // the AI chat panel keyboard command: ctrl/cmd+alt+A toggles the chat
+  // overlay (desktop only). Same capture-phase + e.code pattern as the icon
+  // finder above (AltGr-safe) so tldraw never sees the combo.
+  useEffect(() => {
+    if (!isTauri()) return;
+    const onKey = (e: KeyboardEvent) => {
+      const isA = e.code === 'KeyA' || e.key.toLowerCase() === 'a';
+      if (!isA || !(e.ctrlKey || e.metaKey) || !e.altKey) return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
+      const ed = getEditor();
+      if (!ed || ed.getEditingShapeId()) return;
+      e.preventDefault();
+      e.stopPropagation();
+      useAiStore.getState().toggle();
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [getEditor]);
+
   function handlePaddingChange(value: number) {
     const clamped = Math.min(Math.max(Math.round(value) || 0, 0), 200);
     setPagePadding(clamped);
@@ -162,35 +235,19 @@ export function CanvasShell({ notebook, chapter }: { notebook: Notebook; chapter
 
   return (
     <>
-      <div className="flex h-dvh w-full flex-col overflow-hidden bg-canvas">
+        <div className="relative flex h-dvh w-full flex-col overflow-hidden bg-canvas">
         <IconFinder open={iconsOpen} onClose={() => useIconFinderStore.getState().setOpen(false)} />
         {!pageView.viewMode && (
           <CanvasTopBar
             chapterName={chapter.name}
             pageMenuSlotRef={ui.pageMenuSlotRef}
             mainMenuSlotRef={ui.mainMenuSlotRef}
-            pageControls={
-              isPageChapter && activePages.length > 0
-                ? {
-                    index: activePageIndex,
-                    count: activePages.length,
-                    onPrev: () => goToSheet(activePageIndex - 1),
-                    onNext: () => goToSheet(activePageIndex + 1),
-                    onAdd: addSheet,
-                  }
-                : null
-            }
-            pageActions={
-              isPageChapter && activePages.length > 0
-                ? {
-                    onExportPdf: pageView.handleExportPdf,
-                    exporting: pageView.exporting,
-                    onToggleView: pageView.toggleViewMode,
-                  }
-                : null
-            }
+            /* header strip (name / topic / ⋮) only on page chapters —
+               infinite canvases stay clean, keeping Back + Settings chips */
+            strip={isPageChapter}
             onOpenSettings={() => setSettingsOpen((o) => !o)}
             onBack={() => navigate(`/notebooks/${notebook.id}`)}
+            onOpenAi={isTauri() ? () => useAiStore.getState().toggle() : undefined}
           />
         )}
 
@@ -200,14 +257,12 @@ export function CanvasShell({ notebook, chapter }: { notebook: Notebook; chapter
               {error}
             </div>
           )}
-          {pageView.exportError && (
-            <div className="absolute left-1/2 top-4 z-30 -translate-x-1/2 rounded-lg bg-red-950/90 px-4 py-2 text-sm text-red-300 shadow-lg backdrop-blur">
-              PDF export failed: {pageView.exportError}
-            </div>
-          )}
 
           <ViewModeContext.Provider value={pageView.viewMode}>
-            <div className="oort-editor absolute inset-0">
+            {/* chapter-type class lets CSS tune the canvas backdrop: infinite
+                canvases read the same dimmed tone the page-stack bands
+                produce around page sheets, so both look alike */}
+            <div className={`oort-editor absolute inset-0 ${isPageChapter ? 'oort-pages' : 'oort-infinite'}`}>
               <ZoomSlotContext.Provider value={ui.zoomSlot}>
                 <Tldraw
                   tools={[ComponentsTool]}
@@ -239,6 +294,57 @@ export function CanvasShell({ notebook, chapter }: { notebook: Notebook; chapter
           </ViewModeContext.Provider>
 
           {pageView.viewMode && <ViewModeHint />}
+
+          {/* AI overlays: the chat panel and the destructive-tool confirm
+              card (rendered outside the panel so deletes are confirmable
+              even while the panel is closed). The working pill is canvas-
+              wide: it reports tool execution even when the panel is closed. */}
+          {!pageView.viewMode && isTauri() && (
+            <>
+              <AiChatPanel />
+              <AiConfirmCard />
+              {/* right-click → "AI help…": floating anchored prompt */}
+              <AiCanvasPrompt getEditor={getEditor} />
+              {/* glowing ghosts at the exact size/placement of what the AI
+                  is creating (executor-predicted boxes) */}
+              <AiGhostLayer getEditor={getEditor} />
+              <AiBusyPill />
+            </>
+          )}
+
+          {/* page pager: a floating chip at the bottom-right corner — page
+              nav lives beside the canvas content instead of the hover
+              chrome, so paging is always one hop away */}
+          {!pageView.viewMode && isPageChapter && activePages.length > 0 && (
+            <div className="pointer-events-auto absolute bottom-3 right-3 z-30 flex items-center gap-0.5 rounded-lg border border-line bg-raised px-1 py-0.5 shadow-[0_2px_10px_rgba(0,0,0,0.35)]">
+              <button
+                title="Previous page"
+                onClick={() => goToSheet(activePageIndex - 1)}
+                disabled={activePageIndex === 0}
+                className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-raised hover:text-foreground disabled:opacity-30 disabled:hover:bg-transparent"
+              >
+                <ChevronLeft className="h-3 w-3" />
+              </button>
+              <span className="min-w-10 text-center text-xs tabular-nums text-ink">
+                {activePageIndex + 1} / {activePages.length}
+              </span>
+              <button
+                title="Next page"
+                onClick={() => goToSheet(activePageIndex + 1)}
+                disabled={activePageIndex >= activePages.length - 1}
+                className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-raised hover:text-foreground disabled:opacity-30 disabled:hover:bg-transparent"
+              >
+                <ChevronRight className="h-3 w-3" />
+              </button>
+              <button
+                title="Add page"
+                onClick={addSheet}
+                className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-raised hover:text-foreground"
+              >
+                <Plus className="h-4 w-4" />
+              </button>
+            </div>
+          )}
 
           <CanvasSettingsCard
             open={settingsOpen}

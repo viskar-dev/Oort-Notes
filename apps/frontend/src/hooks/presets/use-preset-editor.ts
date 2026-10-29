@@ -4,6 +4,7 @@ import { api, type UiPreset } from '@/lib/ipc';
 import { defaultConfig, normalizeConfig } from '@/lib/preset-config';
 import type { PresetConfig } from '@/constants/presets/catalog';
 import { errorText } from '@/lib/utils';
+import { toast } from 'sonner';
 
 export type PresetEditorTab = 'toolbar' | 'colors' | 'fonts' | 'sizes';
 
@@ -73,6 +74,7 @@ export function usePresetEditor(presetId: string | undefined) {
       } else {
         await api.updateUiPreset(presetId!, { name: name.trim(), config });
       }
+      toast.success('Preset saved', { description: name.trim() });
       navigate('/settings');
     } catch (e) {
       setError(errorText(e));

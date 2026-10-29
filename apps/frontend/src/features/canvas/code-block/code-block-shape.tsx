@@ -11,7 +11,7 @@ import {
   type TLBaseShape,
   type TLResizeInfo,
 } from 'tldraw';
-import { Check, ChevronsUpDown, Copy } from 'lucide-react';
+import { ChevronsUpDown } from 'lucide-react';
 
 // ================= shiki singleton =================
 
@@ -125,7 +125,6 @@ function CodeBlockView({ shape }: { shape: CodeBlockShape }) {
     editor,
     shape.id,
   ]);
-  const [copied, setCopied] = useState(false);
   const contentRef = useRef<HTMLDivElement>(null);
 
   function setEditing(next: boolean) {
@@ -159,13 +158,6 @@ function CodeBlockView({ shape }: { shape: CodeBlockShape }) {
     ro.observe(el);
     return () => ro.disconnect();
   }, [editor, shape.id, autoHeight]);
-
-  function copy() {
-    navigator.clipboard?.writeText(code).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    });
-  }
 
   function update(props: Partial<CodeBlockShape['props']>) {
     editor.updateShape({ id: shape.id, type: 'code-block', props });
@@ -210,7 +202,7 @@ function CodeBlockView({ shape }: { shape: CodeBlockShape }) {
           </button>
         )}
 
-        <select
+        {/*<select
           value={fontSize}
           onPointerDown={stopEventPropagation}
           onChange={(e) => update({ fontSize: Number(e.target.value) })}
@@ -237,7 +229,7 @@ function CodeBlockView({ shape }: { shape: CodeBlockShape }) {
         </select>
         <button onPointerDown={stopEventPropagation} onClick={copy} title="Copy code" className={btn}>
           {copied ? <Check className="h-3.5 w-3.5 text-[#37ba7c]" /> : <Copy className="h-3.5 w-3.5" />}
-        </button>
+        </button>*/}
       </div>
 
       {/* body */}

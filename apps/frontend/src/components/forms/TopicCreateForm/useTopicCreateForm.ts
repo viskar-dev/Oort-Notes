@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { errorText } from '@/lib/utils';
+import { toast } from 'sonner';
 import { topicCreateFormSchema } from './topicCreateForm.schema';
 
 /** Topic-create form logic: name draft, validation through the zod schema,
@@ -26,6 +27,7 @@ export function useTopicCreateForm({
       await onCreate(name.trim());
       setName('');
       onClose();
+      toast.success('Topic created', { description: name.trim() });
     } catch (err) {
       setServerError(errorText(err));
     } finally {

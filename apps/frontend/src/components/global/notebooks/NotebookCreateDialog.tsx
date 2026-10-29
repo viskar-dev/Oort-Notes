@@ -11,10 +11,10 @@ export function NotebookCreateDialog({
 }) {
   return (
     <Dialog open onOpenChange={(next) => !next && onClose()}>
-      <DialogContent>
+      <DialogContent className="p-4">
         <DialogHeader>
           <DialogTitle>New notebook</DialogTitle>
-          <DialogDescription>
+          <DialogDescription className="text-xs">
             Notebooks hold chapters of topics on their canvases.
           </DialogDescription>
         </DialogHeader>

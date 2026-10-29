@@ -175,14 +175,14 @@ export function IconFinder({ open, onClose }: { open: boolean; onClose: () => vo
     <Dialog open={open} onOpenChange={(next) => !next && onClose()} modal={false}>
       <DialogContent
         className="flex h-[70vh] max-w-[min(640px,calc(100vw-2rem))] flex-col gap-3 p-4 sm:max-w-[min(640px,calc(100vw-2rem))]"
-        overlay={false}
+        showOverlay={false}
       >
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Sticker className="h-4 w-4" /> Icon finder
           </DialogTitle>
           <DialogDescription className="text-xs">
-            All of icon-sets.iconify.design, fetched through your note server. Drag icons straight onto the canvas.
+            All of icon-sets.iconify.design, served by the app core. Drag icons straight onto the canvas.
           </DialogDescription>
         </DialogHeader>
 
@@ -202,7 +202,7 @@ export function IconFinder({ open, onClose }: { open: boolean; onClose: () => vo
           {busy
             ? 'Searching…'
             : failed
-              ? 'Search failed — is the note server running?'
+              ? 'Search failed — check your connection.'
               : result
                 ? `${result.total} icons in ${setCount} sets`
                 : ''}

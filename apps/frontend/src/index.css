@@ -2,6 +2,7 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 @import "@fontsource-variable/geist";
+@import "@fontsource-variable/inter";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -16,36 +17,189 @@
   --color-canvas: #060608;     /* editor background (bg) */
   --color-line: #24232c;       /* borders */
   --color-accent-strong: #7c6ee6;
+
+  /* 2026 chrome tokens (notebooks home design spec). "iris" is the spec's
+     accent color; the name `accent` itself is owned by the shadcn mapping
+     below, so the token lives under its own key to keep dropdowns/selects
+     painting identically app-wide. */
+  --color-bg: #09090b;
+  --color-fg-1: #f2f2f3;
+  --color-fg-2: #a1a1a6;
+  --color-fg-3: #6b6b70;
+  --color-ok: #4ade80;
+  --color-iris: #7c7cf8;
+
+  /* the two allowed shadows + the one allowed easing curve */
+  --shadow-focus: 0 0 0 2px #09090b, 0 0 0 4px rgba(124, 124, 248, 0.4);
+  --shadow-dot: 0 0 0 3px rgba(74, 222, 128, 0.15);
+  --ease-out: cubic-bezier(0.32, 0.72, 0, 1);
 }
 
+/* native window caption panel (tauri-plugin-decoration) runtime settings —
+   deliberately a plain :root rule, NOT @theme: Tailwind v4 tree-shakes
+   @theme variables that no utility references, and these are consumed by
+   the plugin's own stylesheet (invisible to Tailwind). Height matches the
+   app navbar band (h-14) so the buttons align inside every screen's
+   header; z-index sits above all app chrome. */
+:root {
+  --tauri-plugin-decoration-titlebar-height: 56px;
+  --tauri-plugin-decoration-z-index: 9999;
+  /* shadcn base tokens live on the Oort dark palette (the app is dark-only;
+     the .dark block below carries the identical set). */
+  --background: #09090b;
+  --foreground: #f2f2f3;
+  --card: #111016;
+  --card-foreground: #f4f4f6;
+  --popover: #111016;
+  --popover-foreground: #f4f4f6;
+  --primary: #7c6ee6;
+  --primary-foreground: #ffffff;
+  --secondary: #17161c;
+  --secondary-foreground: #f4f4f6;
+  --muted: #17161c;
+  --muted-foreground: #8b8a96;
+  --accent: #17161c;
+  --accent-foreground: #f4f4f6;
+  --destructive: oklch(0.704 0.191 22.216);
+  --border: #24232c;
+  --input: #24232c;
+  --ring: #7c6ee6;
+  --chart-1: oklch(0.87 0 0);
+  --chart-2: oklch(0.556 0 0);
+  --chart-3: oklch(0.439 0 0);
+  --chart-4: oklch(0.371 0 0);
+  --chart-5: oklch(0.269 0 0);
+  --radius: 0.625rem;
+  --sidebar: #111016;
+  --sidebar-foreground: #f4f4f6;
+  --sidebar-primary: #7c6ee6;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #17161c;
+  --sidebar-accent-foreground: #f4f4f6;
+  --sidebar-border: #24232c;
+  --sidebar-ring: #7c6ee6;
+}
 
-
+/* thin scrollbars: 4px, transparent track, thumb appears on container hover */
 * {
-  scrollbar-width: none;
+  scrollbar-width: thin;
   -ms-overflow-style: none;
+  scrollbar-color: transparent transparent;
+}
+
+*:hover {
+  scrollbar-color: rgba(255, 255, 255, 0.12) transparent;
 }
 
 *::-webkit-scrollbar {
-  display: none;
-  width: 0;
-  height: 0;
+  width: 4px;
+  height: 4px;
 }
 
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
 
+*::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: 9999px;
+}
+
+*:hover::-webkit-scrollbar-thumb,
+*:focus-within::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+/* One scroll owner: the body. html/#root used to be scroll containers too —
+   three nested `overflow: auto` boxes meant the moment anything overflowed a
+   hair, a bar reserved 10px, and content sized to the viewport (min-h-screen)
+   no longer fit the shrunken box: both scrollbars locked on forever with no
+   visible overflow. Now the body scrolls pages; #root just grows. */
 html,
-body,
-#root {
+body {
   height: 100%;
-  overflow: auto;
+}
+html {
+  overflow: hidden;
+}
+body {
+  overflow-y: auto;
+  /* the page grid is designed to never need horizontal page-scroll */
+  overflow-x: hidden;
+}
+
+/* the page's single allowed gradient: a soft accent glow behind the chrome.
+   Negative z-index keeps it above the propagated body background but under
+   every content layer. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background: radial-gradient(640px 420px at 50% -120px, rgba(124, 124, 248, 0.08), transparent 70%);
 }
 
 body {
-
   margin: 0;
-  background: var(--color-canvas);
-  color: var(--color-ink);
+  background: var(--color-bg);
+  color: var(--color-fg-1);
   font-family: var(--font-sans);
+  font-feature-settings: "cv11", "ss01";
   -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  background: rgba(124, 124, 248, 0.25);
+}
+
+:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px #09090b, 0 0 0 4px rgba(124, 124, 248, 0.4);
+}
+
+/* text fields are focused for typing, not activation — they never show the
+   chrome ring (their wrappers communicate focus through borders/fills) */
+input:focus-visible,
+textarea:focus-visible,
+[contenteditable]:focus-visible {
+  box-shadow: none;
+}
+
+/* the editor draws its own focus visuals; the chrome ring stays off-canvas */
+.oort-editor :focus-visible,
+.oort-editor:focus-visible,
+.tl-container :focus-visible,
+.tl-container:focus-visible {
+  box-shadow: none;
+}
+
+/* list dividers that fade at both ends, instead of border-b */
+.hairline {
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.07), transparent);
+}
+
+/* page-enter motion (staggered per section via inline animationDelay) */
+@keyframes fadeUp {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }
 
 /* tldraw editor: Oort theme on top of its dark theme. The floating UI
@@ -98,6 +252,13 @@ body {
   color: var(--color-text-1);
   font-size: 13px;
   font-variant-numeric: tabular-nums;
+}
+
+/* infinite canvases sit on the same tone the page-stack dim bands
+   (rgba(5,5,6,0.93) over #060608 = #050506) produce around page sheets,
+   so topic and page chapters read as one backdrop */
+.oort-editor.oort-infinite .tl-theme__dark {
+  --color-background: #050506;
 }
 
 .oort-editor .tl-theme__dark {
@@ -163,27 +324,35 @@ body {
   --radius-2xl: calc(var(--radius) * 1.5);
   --radius-3xl: calc(var(--radius) * 1.9);
   --radius-4xl: calc(var(--radius) * 2.2);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
 }
 
 :root {
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
+  --background: #09090b;
+  --foreground: #f2f2f3;
+  --card: #111016;
+  --card-foreground: #f4f4f6;
+  --popover: #111016;
+  --popover-foreground: #f4f4f6;
+  --primary: #7c6ee6;
+  --primary-foreground: #ffffff;
+  --secondary: #17161c;
+  --secondary-foreground: #f4f4f6;
+  --muted: #17161c;
+  --muted-foreground: #8b8a96;
+  --accent: #17161c;
+  --accent-foreground: #f4f4f6;
+  --destructive: oklch(0.704 0.191 22.216);
+  --border: #24232c;
+  --input: #24232c;
+  --ring: #7c6ee6;
   --chart-1: oklch(0.87 0 0);
   --chart-2: oklch(0.556 0 0);
   --chart-3: oklch(0.439 0 0);
@@ -195,29 +364,37 @@ body {
 }
 
 .dark {
-  --background: #060608;
-  --foreground: #f4f4f6;
+  --background: #09090b;
+  --foreground: #f2f2f3;
   --card: #111016;
   --card-foreground: #f4f4f6;
-  --popover: #14141a;
+  --popover: #111016;
   --popover-foreground: #f4f4f6;
   --primary: #7c6ee6;
   --primary-foreground: #ffffff;
   --secondary: #17161c;
   --secondary-foreground: #f4f4f6;
   --muted: #17161c;
-  --muted-foreground: #a09fab;
+  --muted-foreground: #8b8a96;
   --accent: #17161c;
   --accent-foreground: #f4f4f6;
-  --destructive: #f87171;
+  --destructive: oklch(0.704 0.191 22.216);
   --border: #24232c;
-  --input: #17161c;
+  --input: #24232c;
   --ring: #7c6ee6;
   --chart-1: oklch(0.87 0 0);
   --chart-2: oklch(0.556 0 0);
   --chart-3: oklch(0.439 0 0);
   --chart-4: oklch(0.371 0 0);
   --chart-5: oklch(0.269 0 0);
+  --sidebar: #111016;
+  --sidebar-foreground: #f4f4f6;
+  --sidebar-primary: #7c6ee6;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #17161c;
+  --sidebar-accent-foreground: #f4f4f6;
+  --sidebar-border: #24232c;
+  --sidebar-ring: #7c6ee6;
 }
 
 @layer base {
@@ -232,38 +409,52 @@ body {
   }
 }
 
-
 .tl-watermark_SEE-LICENSE {
   display: none !important;
 }
 
-/* ================= Notebook home (settings tokens per design spec) ===== */
-/* Note: only tokens that don't collide with the shadcn theme live here.
-   The purple accent simply reuses the shadcn `--primary` token. */
-:root {
-  --text: #f4f4f6;        /* primary text */
-  --text-2: #a09fab;      /* secondary text */
-  --text-3: #8b8a96;      /* faint text */
-  --spine: #1b1a21;       /* book spine base */
+/* ================= native caption panel fade =========================== */
+/* On canvas pages the window's native minimize/maximize/close (overlaid by
+   tauri-plugin-decoration at the top-right of the band) fade together with
+   the hover-revealed canvas chrome: CanvasTopBar toggles this body class. */
+[data-tauri-plugin-decoration-root] {
+  transition: opacity 150ms ease;
+}
+body.canvas-chrome-hidden
+  [data-tauri-plugin-decoration-root] {
+  transition-duration: 100ms;
 }
 
-.nb-cover {
-  background-image: linear-gradient(
-    135deg,
-    rgba(255, 255, 255, 0.14) 0%,
-    rgba(255, 255, 255, 0.03) 45%,
-    rgba(0, 0, 0, 0.3) 100%
-  );
+/* native caption buttons: the plugin paints bright glyphs (#f5f5f5 in dark
+   schemes) with stock hover fills — white 10% everywhere, and a bright red
+   band under the close button whose rule outranks a plain override. Sit on
+   the chrome: dim gray glyphs, transparent fill, iris glyph on hover (the
+   extra [data-tauri-decoration-platform] / control="close" attribute
+   selectors out-rank every variant the plugin stylesheet has, injected
+   later though it is) */
+body [data-tauri-plugin-decoration-root] [data-tauri-decoration-control],
+body [data-tauri-plugin-decoration-root] [data-tauri-decoration-platform] [data-tauri-decoration-control] {
+  color: var(--color-fg-2);
+  background: transparent;
 }
-.nb-cover:hover {
-  transform: translateY(-2px);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.08),
-    0 4px 8px rgba(0, 0, 0, 0.3),
-    0 16px 32px rgba(0, 0, 0, 0.45);
+body [data-tauri-plugin-decoration-root] [data-tauri-decoration-control]:hover,
+body [data-tauri-plugin-decoration-root] [data-tauri-decoration-control][data-tauri-decoration-hover],
+body [data-tauri-plugin-decoration-root] [data-tauri-decoration-platform] [data-tauri-decoration-control]:hover,
+body [data-tauri-plugin-decoration-root] [data-tauri-decoration-platform] [data-tauri-decoration-control][data-tauri-decoration-hover],
+body [data-tauri-plugin-decoration-root] [data-tauri-decoration-platform] [data-tauri-decoration-control="close"]:hover,
+body [data-tauri-plugin-decoration-root] [data-tauri-decoration-platform] [data-tauri-decoration-control="close"][data-tauri-decoration-hover] {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--color-iris);
+}
+body.canvas-chrome-hidden [data-tauri-plugin-decoration-root],
+body.canvas-chrome-hidden
+  [data-tauri-plugin-decoration-root]
+  [data-tauri-decoration-controls] {
+  opacity: 0;
+  pointer-events: none;
 }
 
-/* ---- math (KaTeX) ------------------------------------------------- */
+/* ================= math (KaTeX) --------------------------------------- */
 /* inline formulas inside tldraw rich text never wrap mid-formula */
 .tl-math {
   white-space: nowrap;

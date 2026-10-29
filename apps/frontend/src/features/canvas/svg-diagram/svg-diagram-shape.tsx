@@ -51,8 +51,9 @@ const SAMPLE_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 200
 /**
  * Sanitizes pasted SVG and normalizes it to valid XML with a viewBox and
  * 100% sizing. Returns null when the input isn't a usable <svg>.
+ * (Exported for the AI's create_svg executor, which shares this pipeline.)
  */
-function prepareSvg(raw: string): { svg: string; ratio: number } | null {
+export function prepareSvg(raw: string): { svg: string; ratio: number } | null {
   const trimmed = raw.trim();
   if (!trimmed) return null;
 

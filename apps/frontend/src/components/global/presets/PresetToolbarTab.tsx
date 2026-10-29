@@ -46,7 +46,7 @@ export function PresetToolbarTab({
         onDragStart={() => setDragId(item.id)}
         onDragOver={(e) => e.preventDefault()}
         onDrop={() => dropOn(item.id)}
-        className={`flex cursor-grab items-center gap-3 rounded-xl border px-3.5 py-2.5 transition-colors ${
+        className={`flex cursor-grab items-center gap-3  rounded-xl border px-3.5 py-2.5 transition-colors ${
           dim
             ? 'border-line/60 bg-surface/50 text-muted-foreground'
             : 'border-line bg-surface text-ink'

@@ -36,6 +36,21 @@ dotenvy = "0.15"
 # OS keychain access for the desktop refresh token (optional core feature)
 keyring = { version = "4", default-features = false, features = ["v1"] }
 
+# JSON Schema generation for the AI tool registry (derive included by default)
+schemars = "1"
+# OpenAI-compatible chat client for the AI agent loop (works with any base_url)
+async-openai = { version = "0.42", features = ["chat-completion"] }
+# Model Context Protocol server (AI: external clients drive the canvas over
+# streamable HTTP; only the desktop crate depends on it)
+rmcp = { version = "0.7", default-features = false, features = [
+    "base64",
+    "macros",
+    "server",
+    "transport-streamable-http-server",
+] }
+# HTTP framework — pinned here so the desktop MCP host matches note-server
+axum = "0.8"
+
 # Tauri dependencies (only used by the desktop crate, but version pinned here)
 tauri = { version = "2", features = [] }
 tauri-plugin-sql = { version = "2", features = ["sqlite"] }

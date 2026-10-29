@@ -1,7 +1,6 @@
 import { useEffect, useRef } from 'react';
 import {
   DefaultContextMenu,
-  DefaultContextMenuContent,
   TldrawUiMenuGroup,
   TldrawUiMenuItem,
   useContainer,
@@ -10,12 +9,17 @@ import {
   useValue,
 } from 'tldraw';
 import type { TLUiContextMenuProps } from 'tldraw';
+import { isTauri } from '@tauri-apps/api/core';
 import { useIconFinderStore } from '@/stores/icon-finder-store';
+import { useAiCanvasPromptStore } from '@/features/ai/canvas-prompt-store';
+import { OortContextMenuContentWithPdf } from '@/components/global/canvas/ExportAsMenu';
 
 /**
- * The stock canvas context menu with the icon finder appended as its own
- * insert-action group (not a tool; it opens the search dialog). Hidden in
- * view mode the same way every other editing affordance is hidden there.
+ * The stock canvas context menu with a PDF row injected into its "Export as"
+ * submenu (tldraw ships SVG / PNG / Transparent; see ExportAsMenu for the
+ * extension copy), plus this app's icon finder as its own insert-action
+ * group (not a tool; it opens the search dialog). Hidden in view mode the
+ * same way every other editing affordance is hidden there.
  * The kbd hint needs tldraw's lowercase binding grammar — "ctrl+alt+i" —
  * which it renders as Ctrl + Alt + I (⌘⌥I on mac).
  */
@@ -24,7 +28,23 @@ function OortContextMenuContent() {
   const readonly = useValue('canvas is readonly', () => editor.getIsReadonly(), [editor]);
   return (
     <>
-      <DefaultContextMenuContent />
+      <OortContextMenuContentWithPdf />
+      {isTauri() && (
+        <TldrawUiMenuGroup id="oort-ai">
+          {/* Opens the anchored floating prompt at the right-click spot; the
+              geometry was already snapshotted by the canvas shell's capture
+              listener the moment this right-click happened. Deliberately kept
+              free of blur/pointer handling (see ContextBlurGuard) — the card
+              mounts after this menu closes. */}
+          <TldrawUiMenuItem
+            id="oort-ai-help"
+            label="AI help…"
+            onSelect={() => {
+              useAiCanvasPromptStore.getState().openPrompt();
+            }}
+          />
+        </TldrawUiMenuGroup>
+      )}
       {!readonly && (
         <TldrawUiMenuGroup id="oort-insert">
           <TldrawUiMenuItem

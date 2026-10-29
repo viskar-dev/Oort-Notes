@@ -1,21 +1,52 @@
+import type { ReactNode } from 'react';
 import { Controller } from 'react-hook-form';
+import { FileText, Infinity as InfinityIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { DialogFooter } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import {
   Select,
   SelectContent,
   SelectGroup,
-  SelectGroupLabel,
   SelectItem,
+  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
 import { CANVAS_TYPE_CHOICES } from '@/constants/chapters/canvas-types';
 import { useChapterCreateForm } from './useChapterCreateForm';
 
-/** Chapter-create form body: name, canvas type toggle and the page/UI preset
- *  selects; the dialog shell around it lives with the page. */
+const labelClass = 'text-[13px] font-medium text-faint';
+const errorClass = 'mt-1.5 text-[11px] text-destructive';
+
+const CANVAS_OPTIONS = [
+  { finite: false, label: 'Infinite', Icon: InfinityIcon },
+  { finite: true, label: 'Finite', Icon: FileText },
+] as const;
+
+function SelectRow({
+  label,
+  error,
+  children,
+}: {
+  label: string;
+  error?: string;
+  children: ReactNode;
+}) {
+  return (
+    <div>
+      <div className="flex items-center justify-between gap-3">
+        <span className={labelClass}>{label}</span>
+        <div className="w-44 shrink-0">{children}</div>
+      </div>
+      {error && (
+        <p role="alert" className={`${errorClass} text-right`}>
+          {error}
+        </p>
+      )}
+    </div>
+  );
+}
+
 export function ChapterCreateForm({
   notebookId,
   onCreated,
@@ -37,14 +68,22 @@ export function ChapterCreateForm({
     submit,
   } = useChapterCreateForm({ notebookId, onCreated });
 
-  const selectedPreset = presets?.find((p) => p.id === form.watch('presetId'));
+  const otherCanvasType = CANVAS_TYPE_CHOICES.find((c) => c.value !== 'page')?.value;
+  const isPage = canvasType === 'page';
+
+  const setFinite = (finite: boolean) => {
+    const next = finite ? 'page' : otherCanvasType;
+    if (next) form.setValue('canvasType', next, { shouldValidate: true });
+  };
+
   const nameError = form.formState.errors.name?.message;
   const presetError = form.formState.errors.presetId?.message;
+  const formError = optionsError ?? serverError;
 
   return (
-    <form onSubmit={submit} className="flex flex-col gap-4" noValidate>
-      <div>
-        <label htmlFor="chapter-create-name" className="mb-1.5 block text-[13px] font-medium text-[#a09fab]">
+    <form onSubmit={submit} className="flex w-full flex-col gap-4 " noValidate>
+      <div className=''>
+        <label htmlFor="chapter-create-name" className={`${labelClass} mb-1.5 block`}>
           Name
         </label>
         <Input
@@ -56,37 +95,42 @@ export function ChapterCreateForm({
           placeholder="e.g. Graph Theory"
         />
         {nameError && (
-          <p id="chapter-create-name-error" role="alert" className="mt-1.5 text-[11px] text-[#f87171]">
+          <p id="chapter-create-name-error" role="alert" className={errorClass}>
             {nameError}
           </p>
         )}
       </div>
 
       <div>
-        <label className="mb-1.5 block text-[13px] font-medium text-[#a09fab]">Canvas type</label>
-        <div className="grid grid-cols-2 gap-2">
-          {CANVAS_TYPE_CHOICES.map((choice) => (
-            <button
-              key={choice.value}
-              type="button"
-              aria-pressed={canvasType === choice.value}
-              onClick={() => form.setValue('canvasType', choice.value, { shouldValidate: true })}
-              className={`rounded-lg border px-3 py-2.5 text-left transition-colors ${
-                canvasType === choice.value
-                  ? 'border-[#7c6ee6] bg-[#17161c]'
-                  : 'border-[#24232c] hover:border-[#3f3f46]'
-              }`}
-            >
-              <div className="text-[13px] font-medium text-[#f4f4f6]">{choice.title}</div>
-              <div className="text-[11px] text-[#8b8a96]">{choice.hint}</div>
-            </button>
-          ))}
+        <span className={`${labelClass} mb-1.5 block`}>Canvas</span>
+        <div
+          role="radiogroup"
+          aria-label="Canvas type"
+          className="grid grid-cols-2 gap-1 rounded-lg border border-line p-1"
+        >
+          {CANVAS_OPTIONS.map(({ finite, label, Icon }) => {
+            const active = isPage === finite;
+            return (
+              <button
+                key={label}
+                type="button"
+                role="radio"
+                aria-checked={active}
+                onClick={() => setFinite(finite)}
+                className={`flex items-center justify-center gap-1.5 rounded-md py-1.5 text-[13px] font-medium transition-colors ${
+                  active ? 'bg-raised text-ink' : 'text-faint hover:text-ink'
+                }`}
+              >
+                <Icon className="size-4" />
+                {label}
+              </button>
+            );
+          })}
         </div>
       </div>
 
-      {canvasType === 'page' && (
-        <div>
-          <label className="mb-1.5 block text-[13px] font-medium text-[#a09fab]">Page size</label>
+      {isPage && (
+        <SelectRow label="Page size" error={presetError}>
           <Controller
             control={form.control}
             name="presetId"
@@ -95,21 +139,31 @@ export function ChapterCreateForm({
                 value={field.value}
                 onValueChange={(v) => field.onChange(v as unknown as string)}
                 items={
-                  presets ? Object.fromEntries(presets.map((p) => [p.id, `${p.name} (${p.size_label})`])) : undefined
+                  presets
+                    ? Object.fromEntries(presets.map((p) => [p.id, `${p.name} `]))
+                    : undefined
                 }
               >
-                <SelectTrigger aria-invalid={Boolean(presetError)}>
-                  <SelectValue placeholder="Choose a page size" />
+                <SelectTrigger
+                  className="w-full"
+                  aria-label="Page size"
+                  aria-invalid={Boolean(presetError)}
+                >
+                  <SelectValue placeholder="Select size" />
                 </SelectTrigger>
                 <SelectContent>
                   {(['paper', 'ratio'] as const).map((category) => (
                     <SelectGroup key={category}>
-                      <SelectGroupLabel>{category === 'paper' ? 'Paper' : 'Aspect ratio'}</SelectGroupLabel>
+                      <SelectLabel>{category === 'paper' ? 'Paper' : 'Aspect ratio'}</SelectLabel>
                       {presets
                         ?.filter((p) => p.category === category)
                         .map((p) => (
-                          <SelectItem key={p.id} value={p.id} label={`${p.name} (${p.size_label})`}>
-                            {p.name} ({p.size_label})
+                          <SelectItem
+                            key={p.id}
+                            value={p.id}
+                            label={`${p.name} (${p.size_label})`}
+                          >
+                            {p.name}
                           </SelectItem>
                         ))}
                     </SelectGroup>
@@ -118,21 +172,10 @@ export function ChapterCreateForm({
               </Select>
             )}
           />
-          {presetError && (
-            <p role="alert" className="mt-1.5 text-[11px] text-[#f87171]">
-              {presetError}
-            </p>
-          )}
-          {selectedPreset && !presetError && (
-            <p className="mt-1.5 text-[11px] text-[#8b8a96]">
-              {selectedPreset.width} × {selectedPreset.height} px, {selectedPreset.orientation}
-            </p>
-          )}
-        </div>
+        </SelectRow>
       )}
 
-      <div>
-        <label className="mb-1.5 block text-[13px] font-medium text-[#a09fab]">UI preset</label>
+      <SelectRow label="UI preset">
         <Controller
           control={form.control}
           name="uiPresetId"
@@ -145,7 +188,7 @@ export function ChapterCreateForm({
                 ...Object.fromEntries(uiPresets.map((p) => [p.id, p.name])),
               }}
             >
-              <SelectTrigger>
+              <SelectTrigger className="w-full" aria-label="UI preset">
                 <SelectValue placeholder="tldraw defaults" />
               </SelectTrigger>
               <SelectContent>
@@ -159,27 +202,25 @@ export function ChapterCreateForm({
             </Select>
           )}
         />
-        {uiPresets.length === 0 && (
-          <p className="mt-1.5 text-[11px] text-[#8b8a96]">
-            No presets yet — create one in Settings → Presets.
-          </p>
-        )}
-      </div>
+      </SelectRow>
 
-      {(optionsError ?? serverError) && (
-        <div role="alert" className="rounded-lg border border-[#24232c] bg-[#111016] px-4 py-3 text-sm text-[#f87171]">
-          {optionsError ?? serverError}
+      {formError && (
+        <div
+          role="alert"
+          className="rounded-lg border border-line bg-surface px-4 py-3 text-sm text-destructive"
+        >
+          {formError}
         </div>
       )}
 
-      <DialogFooter className="mt-2">
+      <div className="mt-2 w-full flex justify-end items-center">
         <Button type="button" variant="ghost" onClick={onCancel}>
           Cancel
         </Button>
         <Button type="submit" disabled={!name.trim() || isSubmitting}>
           {isSubmitting ? 'Creating…' : 'Create'}
         </Button>
-      </DialogFooter>
+      </div>
     </form>
   );
 }

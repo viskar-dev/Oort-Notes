@@ -503,6 +503,31 @@ pub async fn update_chapter(pool: &SqlitePool, id: &str, name: &str) -> Result<C
     load_chapter(pool, id).await
 }
 
+/// Overrides a page-type chapter's sheet size in place (the AI's
+/// `set_page_config`). The page preset stays referenced; the size columns
+/// stop matching it — same rule as a custom size entered at creation.
+pub async fn set_chapter_page_size(
+    pool: &SqlitePool,
+    id: &str,
+    page_width: Option<i64>,
+    page_height: Option<i64>,
+) -> Result<Chapter, CoreError> {
+    let result = sqlx::query(
+        "UPDATE chapters SET page_width = ?, page_height = ?, updated_at = ?
+         WHERE id = ? AND deleted_at IS NULL",
+    )
+    .bind(page_width)
+    .bind(page_height)
+    .bind(now_ms())
+    .bind(id)
+    .execute(pool)
+    .await?;
+    if result.rows_affected() == 0 {
+        return Err(CoreError::NotFound(format!("chapter {id}")));
+    }
+    load_chapter(pool, id).await
+}
+
 /// Changes the UI preset a chapter uses. Pass None to fall back to tldraw
 /// defaults. Validates the preset exists when one is given.
 pub async fn set_chapter_ui_preset(
@@ -746,7 +771,7 @@ pub async fn delete_topic_page(pool: &SqlitePool, id: &str) -> Result<(), CoreEr
 
 /// Count shapes in a tldraw snapshot without trusting its exact layout:
 /// they live under document.store keyed as "shape:<id>".
-fn count_shapes(snapshot: &serde_json::Value) -> i64 {
+pub(crate) fn count_shapes(snapshot: &serde_json::Value) -> i64 {
     snapshot
         .get("document")
         .and_then(|d| d.get("store"))

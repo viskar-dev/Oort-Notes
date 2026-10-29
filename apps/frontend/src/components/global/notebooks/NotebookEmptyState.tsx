@@ -1,4 +1,4 @@
-import { Plus } from 'lucide-react';
+import { BookOpen, Plus } from 'lucide-react';
 import type { NotebookFilter } from '@/lib/ipc';
 
 /** The two "nothing here" states: no match for the current search/filter
@@ -16,40 +16,28 @@ export function NotebookEmptyState({
 }) {
   if (hasQuery || filter !== 'all') {
     return (
-      <div className="py-10 text-center">
-        <p className="text-sm text-[#a09fab]">No notebooks match</p>
+      <div className="flex flex-col items-center py-16 text-center">
+        <p className="text-sm text-fg-2">No notebooks match</p>
         <button
           onClick={onClearFilters}
-          className="mt-4 h-9 rounded-[10px] border border-[#24232c] px-4 text-[13px] text-[#a09fab] transition-colors hover:bg-[#17161c]"
+          className="mt-3 inline-flex h-8 items-center rounded-lg px-2.5 text-sm text-fg-2 transition-colors duration-150 hover:bg-white/[0.04] hover:text-iris"
         >
-          Clear filter
+          Clear
         </button>
       </div>
     );
   }
 
   return (
-    <div className="py-10 text-center">
-      <div className="mx-auto max-w-[280px]">
-        <button
-          type="button"
-          onClick={onOpenCreate}
-          title="Create a notebook"
-          className="nb-cover mb-8 flex w-full cursor-pointer items-center justify-center"
-          style={{ borderStyle: 'dashed' }}
-        >
-          <span className="text-[#a09fab]">
-            <Plus className="h-8 w-8" />
-          </span>
-        </button>
-        <p className="text-sm text-[#a09fab]">Create your first notebook</p>
-        <button
-          onClick={onOpenCreate}
-          className="mt-4 inline-flex h-10 items-center gap-2 rounded-[10px] bg-[#7c6ee6] px-4 text-sm font-medium text-white transition-colors hover:bg-[#8b7ff0] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#7c6ee6]"
-        >
-          <Plus className="h-4 w-4" /> New notebook
-        </button>
-      </div>
+    <div className="flex flex-col items-center py-20 text-center">
+      <BookOpen className="h-8 w-8 text-fg-3" strokeWidth={1.5} aria-hidden />
+      <p className="mt-4 text-sm text-fg-2">No notebooks yet</p>
+      <button
+        onClick={onOpenCreate}
+        className="mt-3 inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-sm text-fg-2 transition-colors duration-150 hover:bg-white/[0.04] hover:text-iris"
+      >
+        <Plus className="h-3.5 w-3.5" strokeWidth={1.5} aria-hidden /> Create your first notebook
+      </button>
     </div>
   );
 }

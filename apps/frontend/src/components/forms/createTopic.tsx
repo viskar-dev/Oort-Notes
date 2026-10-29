@@ -48,7 +48,7 @@ export function CreateTopicDialog({
         </DialogHeader>
         <form onSubmit={submit} className="flex flex-col gap-4">
           <div>
-            <label className="mb-1.5 block text-[13px] font-medium text-[#a09fab]">Name</label>
+            <label className="mb-1.5 block text-[13px] font-medium text-faint">Name</label>
             <Input
               value={name}
               onChange={(e) => setName(e.target.value)}
@@ -64,7 +64,7 @@ export function CreateTopicDialog({
           </div>
 
           {error && (
-            <div className="rounded-lg border border-[#24232c] bg-[#111016] px-4 py-3 text-sm text-[#f87171]">
+            <div className="rounded-lg border border-line bg-surface px-4 py-3 text-sm text-destructive">
               {error}
             </div>
           )}
