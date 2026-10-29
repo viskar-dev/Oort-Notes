@@ -162,7 +162,6 @@ const CSS = `
 .tl-cc-field{position:relative;min-height:1.4em;user-select:none;border-radius:4px}
 .tl-cc-field p{margin:0}
 .tl-cc-field .ProseMirror{outline:none;user-select:text;white-space:pre-wrap;margin:0}
-.tl-cc-field.is-active{box-shadow:0 0 0 2px color-mix(in srgb,var(--cb-accent) 55%,transparent)}
 .tl-cc-placeholder{opacity:.4}
 `;
 
@@ -280,6 +279,10 @@ function CalloutView({ shape }: { shape: CalloutCardShape }) {
     if (!el) return;
     const fit = () => {
       if (editor.getIsReadonly()) return;
+      // a zero-ish measurement means the container isn't laid out yet (font
+      // gate, editor recreation, culling remount): writing would collapse
+      // the stored height to the minimum and the selection box with it
+      if (el.offsetHeight <= 0) return;
       const cur = editor.getShape<CalloutCardShape>(shape.id);
       if (!cur) return;
       const needed = Math.max(MIN_H, Math.ceil(el.offsetHeight) + 2); // + card border

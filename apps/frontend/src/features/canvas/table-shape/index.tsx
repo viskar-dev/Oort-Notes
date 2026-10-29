@@ -595,6 +595,10 @@ function TableView({ shape }: { shape: TableShape }) {
     if (!el) return;
     const fit = () => {
       if (editor.getIsReadonly()) return;
+      // a zero-ish measurement means the container isn't laid out yet (font
+      // gate, editor recreation, culling remount): writing would collapse
+      // the stored height to the minimum and the selection box with it
+      if (el.offsetHeight <= 0) return;
       const cur = editor.getShape<TableShape>(shape.id);
       if (!cur) return;
       const needed = Math.max(MIN_H, Math.ceil(el.offsetHeight) + 2); // + card border
