@@ -5,12 +5,14 @@ use tauri::{Manager, State, WebviewWindow};
 mod ai_bridge;
 mod ai_commands;
 mod ai_mcp;
+mod icons;
 
 // Tauri's generate_handler! needs the command wrappers in this scope.
 use ai_commands::{
     ai_cancel_turn, ai_chat, canvas_result, clear_api_key, get_ai_config, get_mcp_connection_info,
     has_api_key, list_tool_names, rotate_mcp_token, set_active_canvas, set_ai_config, set_api_key,
 };
+use icons::{icon_search, icon_set_data};
 
 type R<T> = Result<T, String>;
 
@@ -787,6 +789,8 @@ pub fn run() {
             ai_chat,
             ai_cancel_turn,
             canvas_result,
+            icon_search,
+            icon_set_data,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

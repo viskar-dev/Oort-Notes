@@ -24,6 +24,9 @@ pub enum CoreError {
     #[error("ai error: {0}")]
     Ai(String),
 
+    #[error("external service error: {0}")]
+    External(String),
+
     #[error("internal error: {0}")]
     Internal(String),
 }

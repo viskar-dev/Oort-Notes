@@ -182,7 +182,7 @@ export function IconFinder({ open, onClose }: { open: boolean; onClose: () => vo
             <Sticker className="h-4 w-4" /> Icon finder
           </DialogTitle>
           <DialogDescription className="text-xs">
-            All of icon-sets.iconify.design, fetched through your note server. Drag icons straight onto the canvas.
+            All of icon-sets.iconify.design, served by the app core. Drag icons straight onto the canvas.
           </DialogDescription>
         </DialogHeader>
 
@@ -202,7 +202,7 @@ export function IconFinder({ open, onClose }: { open: boolean; onClose: () => vo
           {busy
             ? 'Searching…'
             : failed
-              ? 'Search failed — is the note server running?'
+              ? 'Search failed — check your connection.'
               : result
                 ? `${result.total} icons in ${setCount} sets`
                 : ''}
