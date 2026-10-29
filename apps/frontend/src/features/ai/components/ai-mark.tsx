@@ -1,4 +1,4 @@
-import { useId, type CSSProperties } from 'react';
+import { useId } from 'react';
 import { motion } from 'motion/react';
 
 /** The Oort mark: the app icon's ring + node dot — the same art as the
@@ -30,21 +30,21 @@ export function OortMark({ working, size = 18 }: { working?: boolean; size?: num
 }
 
 /** The "generation in flight" glare: a sweeping light band over a quiet
- *  block (the AI Elements Shimmer technique, as shape placeholders). */
-export const GLARE_STYLE: CSSProperties = {
-  backgroundImage:
-    'linear-gradient(90deg, #0000 calc(50% - 44px), rgb(255 255 255 / 0.16) 50%, #0000 calc(50% + 44px)),' +
-    'linear-gradient(rgb(255 255 255 / 0.08), rgb(255 255 255 / 0.08))',
-  backgroundSize: '250% 100%, auto',
-  backgroundRepeat: 'no-repeat, padding-box',
-};
-
-export function GlareBlock({ className }: { className: string }) {
+ *  block (the AI Elements Shimmer technique, as shape placeholders). `faint`
+ *  drops the fill layer to a whisper — used when the glare lays ON an
+ *  existing shape being transformed, so the shape shows through. */
+export function GlareBlock({ className, faint }: { className: string; faint?: boolean }) {
   return (
     <motion.span
       aria-hidden
       className={`block ${className}`}
-      style={GLARE_STYLE}
+      style={{
+        backgroundImage:
+          'linear-gradient(90deg, #0000 calc(50% - 44px), rgb(255 255 255 / 0.16) 50%, #0000 calc(50% + 44px)),' +
+          `linear-gradient(rgb(255 255 255 / ${faint ? 0.03 : 0.08}), rgb(255 255 255 / ${faint ? 0.03 : 0.08}))`,
+        backgroundSize: '250% 100%, auto',
+        backgroundRepeat: 'no-repeat, padding-box',
+      }}
       initial={{ backgroundPosition: '100% center' }}
       animate={{ backgroundPosition: '0% center' }}
       transition={{ duration: 2, ease: 'linear', repeat: Number.POSITIVE_INFINITY }}

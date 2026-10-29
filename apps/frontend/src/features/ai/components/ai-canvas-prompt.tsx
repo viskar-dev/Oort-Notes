@@ -1,18 +1,25 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Editor } from 'tldraw';
+import { toast } from 'sonner';
 import { useAiStore, type ConversationEvent } from '../ai-store';
 import { useAiCanvasPromptStore } from '../canvas-prompt-store';
+import { MUTATING_TOOLS } from '../executors';
 import { outlineShapes } from '../canvas-outline';
 import { useCameraTick } from '../use-camera-tick';
-import { MessageResponse } from '@/components/ai-elements/message';
 import { OortMark } from './ai-mark';
 
-/** The assistant's answer text inside a settled event slice. */
-function assistantText(events: ConversationEvent[]): string {
-  return events
-    .filter((event) => event.kind === 'agent' && event.role === 'assistant')
-    .map((event) => event.text)
-    .join('\n\n');
+/** Did this turn's slice actually edit the canvas? A turn that ran no
+ *  mutating tool is a reply to the user (a clarification/refusal/answer),
+ *  not a delivery — those belong in the assistant chat window (task
+ *  routing: the canvas window initiates the chat, the panel continues it). */
+function didEditCanvas(slice: ConversationEvent[]): boolean {
+  return slice.some(
+    (event) =>
+      event.kind === 'agent' &&
+      event.role === 'tool' &&
+      event.tool !== null &&
+      MUTATING_TOOLS.has(event.tool),
+  );
 }
 
 /** Renders nothing while closed (mounted unconditionally from CanvasShell). */
@@ -59,10 +66,11 @@ function AiCanvasPromptCard({
   const page = useAiCanvasPromptStore((s) => s.page);
   const selection = useAiCanvasPromptStore((s) => s.selection);
   const [input, setInput] = useState('');
-  /** The prompt of the turn this card is waiting on (alive until settled). */
+  /** The prompt of the turn this card is waiting on. The turn is FULLY
+   *  rendered on the canvas itself (ghost glows form where shapes land);
+   *  this card only tells "working" here — the answer text lives in the AI
+   *  assistant panel, which shows the full live transcript. */
   const [pending, setPending] = useState<string | null>(null);
-  /** The latest settled answer shown here (stays until the next request). */
-  const [answer, setAnswer] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   // Camera moves must re-place the card once it is world-anchored.
   useCameraTick(getEditor);
@@ -75,10 +83,10 @@ function AiCanvasPromptCard({
   }, []);
 
   // Click elsewhere dismisses (the way every popover in the app behaves) —
-  // but only once a submitted turn has settled. While the card is working
-  // (or showing its fresh answer), clicking the canvas keeps it anchored:
-  // the turn runs in the background and the answer lands whenever the user
-  // comes back. The canvas stays fully interactive meanwhile.
+  // but only once the submitted turn has settled. While it works, the card
+  // stays anchored: the turn runs in the background and the result lands
+  // (shapes pop in where their glow was) whenever it finishes. The canvas
+  // stays fully interactive meanwhile.
   useEffect(() => {
     const busy = pending !== null;
     const onPointerDown = (event: PointerEvent) => {
@@ -101,15 +109,13 @@ function AiCanvasPromptCard({
   if (!page) return null;
 
   const working = pending !== null;
-  const expanded = answer !== null;
-  const anchored = working || expanded;
 
   // World anchor: idle the card floats at the right-click's screen position;
-  // from submit onwards it is pinned to the canvas position the request was
-  // anchored to — pan/zoom moves it with the content, so the user can travel
-  // the canvas (chase the ghost glows) while the turn runs.
+  // from submit until settle it is pinned to the canvas position the request
+  // was anchored to — pan/zoom moves it with the content, so the user can
+  // travel the canvas (chase the ghost glows) while the turn runs.
   let pos = at;
-  if (anchored) {
+  if (working) {
     const editor = getEditor();
     if (editor && typeof editor.pageToScreen === 'function') pos = editor.pageToScreen(page);
   }
@@ -146,18 +152,32 @@ function AiCanvasPromptCard({
     const startIndex = useAiStore.getState().events.length;
     setInput('');
     setPending(text);
-    setAnswer(null);
-    const settled = useAiStore.getState().send(text, context).then(
-      () => {
-        // The final list is authoritative; the store's tail (our slice) is
-        // replaced by it via settleTurn.
+    void useAiStore
+      .getState()
+      .send(text, context)
+      .then(() => {
+        const state = useAiStore.getState();
+        if (state.error) return; // failure is toasted below
+        const slice = state.events.slice(startIndex);
+        if (!didEditCanvas(slice)) {
+          // Nothing was created or changed: the reply wants the user's input
+          // (a question, a clarification, a refusal). The assistant chat
+          // window asks it — the transcript there holds this whole turn,
+          // streamed live, so the user answers right where the chat began.
+          state.setOpen(true);
+        }
+      })
+      .catch(() => undefined) // send never rejects; belt and braces
+      .finally(() => {
         const error = useAiStore.getState().error;
-        setAnswer(assistantText(useAiStore.getState().events.slice(startIndex)) ||
-          (error ? `Request failed: ${error}` : 'No response text — the AI panel has the details.'));
-      },
-      () => setAnswer('Request failed — the AI panel has the details.'),
-    );
-    void settled.finally(() => setPending(null));
+        if (error) {
+          toast.error('AI request failed', { description: error });
+        }
+        setPending(null);
+        // Done means done: the canvas shows what was created, the panel
+        // holds the transcript. The card never displays response text.
+        onClose();
+      });
   };
 
   const inputRow = (
@@ -190,34 +210,21 @@ function AiCanvasPromptCard({
       data-testid="ai-canvas-prompt"
       className={[
         'fixed z-50 flex flex-col bg-[#111016] text-[#f4f4f6] ring-1 ring-[#24232c] shadow-lg shadow-black/25',
-        expanded
-          ? 'w-80 gap-2 rounded-2xl p-2'
-          : working
-            ? 'h-11 w-11 items-center justify-center rounded-full'
-            : 'w-80 flex-row items-center rounded-full py-2 pr-2 pl-3',
+        working
+          ? 'h-11 w-11 items-center justify-center rounded-full'
+          : 'w-80 flex-row items-center rounded-full py-2 pr-2 pl-3',
       ].join(' ')}
       style={{
-        left: Math.min(
-          pos.x,
-          Math.max(0, window.innerWidth - (expanded ? 344 : 64)),
-        ),
+        left: Math.min(pos.x, Math.max(0, window.innerWidth - (working ? 64 : 344))),
         top: Math.min(pos.y, Math.max(0, window.innerHeight - 120)),
       }}
       onPointerDown={(e) => e.stopPropagation()}
     >
-      {expanded ? (
-        <>
-          {/* The settled answer (markdown), pinned to the canvas spot the
-              request was anchored to. The live glow state lives on the
-              canvas itself — ghost cards at the size of what is created. */}
-          <div className="max-h-56 overflow-y-auto px-1 text-xs leading-relaxed">
-            <MessageResponse className="text-xs">{answer ?? ''}</MessageResponse>
-          </div>
-          {inputRow}
-        </>
-      ) : working ? (
+      {working ? (
         // Working: ONLY the spinning mark — the glowing ghost cards on the
-        // canvas tell the story of what is being produced and where.
+        // canvas tell the story of what is being produced and where; the
+        // transcript (and any question the model asks back) is in the AI
+        // assistant panel.
         <span aria-hidden className="flex items-center justify-center">
           <OortMark working size={22} />
         </span>

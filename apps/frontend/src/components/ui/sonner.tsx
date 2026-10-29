@@ -17,7 +17,7 @@ const Toaster = ({ ...props }: ToasterProps) => (
     className="toaster group"
     // Top-right, offset below the overlay titlebar band: the bottom corners
     // belong to canvas UI (pager chip, working pill) and must stay clear.
-    position="top-right"
+    position="bottom-right"
     offset={{ top: 52, right: 16 }}
     style={
       {

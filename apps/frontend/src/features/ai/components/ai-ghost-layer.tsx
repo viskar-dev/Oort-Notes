@@ -4,19 +4,25 @@ import { useCameraTick } from '../use-camera-tick';
 import { GlareBlock } from './ai-mark';
 
 /**
- * The glowing ghost cards: while the AI produces canvas content, each target
- * box it computed shows as a pulsing "forming here" glow in real canvas
- * coordinates — panning/zooming moves them with the content. Rendered as
- * fixed-position HTML above the canvas (same way the AI-help pill floats);
- * the floating window itself stays minimal (just the spinning mark) —
- * the canvas does the announcing.
+ * The shimmer layer over the canvas, in real canvas coordinates (pan/zoom
+ * moves the glows with the content; rendered as fixed-position HTML above
+ * the canvas, the same way the AI-help pill floats — the floating window
+ * itself stays minimal, the canvas does the announcing):
+ *
+ * - 'create' ghosts are FILLED "something is forming here" cards at the
+ *   exact box the executor computed for the shapes that will land there.
+ * - 'edit' ghosts lay the shimmer ON the shapes being transformed — a
+ *   see-through dashed card per selected shape, the original visibly alive
+ *   underneath while it converts.
  */
 export function AiGhostLayer({ getEditor }: { getEditor: () => Editor | null }) {
   useCameraTick(getEditor);
   const ghosts = useAiGhostStore((s) => s.ghosts);
   if (ghosts.length === 0) return null;
   const editor = getEditor();
-  if (!editor || typeof editor.pageToScreen !== 'function') return null;
+  if (!editor || typeof editor.pageToScreen !== 'function') {
+    return null;
+  }
 
   const zoom = editor.getZoomLevel?.() ?? 1;
 
@@ -37,10 +43,17 @@ export function AiGhostLayer({ getEditor }: { getEditor: () => Editor | null }) 
         return (
           <div
             key={ghost.id}
-            className="fixed rounded-lg ring-1 ring-[rgba(110,161,255,0.55)] shadow-[0_0_24px_rgba(47,107,255,0.35)] animate-pulse"
+            className={
+              ghost.kind === 'edit'
+                ? // Transforming: dashed card ON the shape — the shape stays
+                  // visible, the sweep reads "this is being worked on".
+                  'fixed rounded-lg border border-dashed border-[rgba(157,123,255,0.75)] shadow-[0_0_18px_rgba(124,77,255,0.25)]'
+                : // Forming: a filled card — something gets generated here.
+                  'fixed overflow-hidden rounded-lg bg-[rgba(23,22,28,0.94)] ring-1 ring-[rgba(157,123,255,0.55)] shadow-[0_0_24px_rgba(124,77,255,0.35)] animate-pulse'
+            }
             style={{ left: tl.x, top: tl.y, width: w, height: h }}
           >
-            <GlareBlock className="h-full w-full rounded-lg" />
+            <GlareBlock faint={ghost.kind === 'edit'} className="h-full w-full rounded-lg" />
           </div>
         );
       })}

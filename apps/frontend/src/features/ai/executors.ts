@@ -34,8 +34,16 @@ export interface AiCanvasContext {
   page: { width: number; height: number; gap: number; count: number } | null;
 }
 
-/** Tools the AI may call that change the canvas. Rejected in view mode. */
-const MUTATING_TOOLS = new Set([
+/** Shape types `create_shapes` may pass through. Custom shapes (icon, card,
+ *  table…) are left out: their required props are app-specific and a
+ *  misplaced guess renders badly or breaks. */
+const CREATE_TYPES = new Set(['geo', 'text', 'note', 'arrow', 'line', 'frame', 'svg-diagram']);
+
+/** Tools the AI may call that change the canvas. Exported for the canvas
+ *  floating prompt: a turn whose slice ran none of these is a question to
+ *  the user (clarification), not a delivery, so it routes to the assistant
+ *  chat window. */
+export const MUTATING_TOOLS = new Set([
   'create_note',
   'create_text',
   'create_math_block',
@@ -50,11 +58,6 @@ const MUTATING_TOOLS = new Set([
   'update_shapes',
   'delete_shapes',
 ]);
-
-/** Shape types `create_shapes` may pass through. Custom shapes (icon, card,
- *  table…) are left out: their required props are app-specific and a
- *  misplaced guess renders badly or breaks. */
-const CREATE_TYPES = new Set(['geo', 'text', 'note', 'arrow', 'line', 'frame', 'svg-diagram']);
 
 const DEFAULT_NOTE_W = 220;
 
@@ -230,6 +233,40 @@ async function ghostDwell(): Promise<void> {
   await new Promise<void>((resolve) => setTimeout(resolve, ghostConfig.dwellMs));
 }
 
+/** Per-shape page-space boxes — the glow laid ON the shapes being edited so
+ *  each one visibly shimmers as it transforms. Defensive everywhere: an
+ *  editor that can't answer bounds just means no glow, never a failed tool
+ *  call. Gigantic selections roll up into one union card past a cap (a glow
+ *  per shape stops being readable long before it stops being renderable). */
+const SELECTION_GLOW_CAP = 24;
+
+function perShapeBoxes(editor: Editor, ids: TLShapeId[]): LayoutRect[] {
+  const boxes: LayoutRect[] = [];
+  try {
+    for (const id of ids) {
+      const bounds = editor.getShapePageBounds(id);
+      if (!bounds) continue;
+      boxes.push({ x: bounds.x, y: bounds.y, w: bounds.w, h: bounds.h });
+    }
+  } catch {
+    return [];
+  }
+  if (boxes.length > SELECTION_GLOW_CAP) {
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    for (const box of boxes) {
+      minX = Math.min(minX, box.x);
+      minY = Math.min(minY, box.y);
+      maxX = Math.max(maxX, box.x + box.w);
+      maxY = Math.max(maxY, box.y + box.h);
+    }
+    return [{ x: minX, y: minY, w: maxX - minX, h: maxY - minY }];
+  }
+  return boxes;
+}
+
 // ---------------------------------------------------------------------------
 // deterministic placement
 // ---------------------------------------------------------------------------
@@ -389,33 +426,41 @@ const round = (value: number) => Math.round(value * 100) / 100;
 // creates
 // ---------------------------------------------------------------------------
 
-function createNote(deps: AiExecutorDeps, args: ToolArgs): ToolValue {
+async function createNote(deps: AiExecutorDeps, args: ToolArgs): Promise<ToolValue> {
   const editor = deps.editor;
   const text = requiredText(args);
   const w = widthArg(args, 160, 1200, DEFAULT_NOTE_W);
   const h = Math.max(64, textLines(text) * 30 + 30);
   const at = planPlacement(editor, deps, args, w, h);
   const id = newShapeId();
-  editor.run(() => {
-    editor.createShape({
-      id,
-      type: 'note',
-      x: at.x,
-      y: at.y,
-      props: { richText: buildRichDocument(text) as never },
+  // The ghost is the box just placed (the same aspect ratio the tool args
+  // gave us) — the glow beat is spent before the real shape lands.
+  const ghost = useAiGhostStore.getState().push([{ x: at.x, y: at.y, w, h }]);
+  try {
+    await ghostDwell();
+    editor.run(() => {
+      editor.createShape({
+        id,
+        type: 'note',
+        x: at.x,
+        y: at.y,
+        props: { richText: buildRichDocument(text) as never },
+      });
+      // "Preferred width"(>120): notes resize through their scale prop.
+      if (w !== DEFAULT_NOTE_W) {
+        const scale = Math.max(0.35, Math.min(4, w / DEFAULT_NOTE_W));
+        editor.updateShape({ id, type: 'note', props: { scale } });
+      }
     });
-    // "Preferred width"(>120): notes resize through their scale prop.
-    if (w !== DEFAULT_NOTE_W) {
-      const scale = Math.max(0.35, Math.min(4, w / DEFAULT_NOTE_W));
-      editor.updateShape({ id, type: 'note', props: { scale } });
-    }
-  });
+  } finally {
+    useAiGhostStore.getState().remove(ghost);
+  }
   return { created: id, x: round(at.x), y: round(at.y), w: round(w), h: round(h) };
 }
 
 /** Native free-standing text: one style, no box, auto-sized. The rough w/h
  *  estimate only feeds the placement clamps; tldraw measures for real. */
-function createText(deps: AiExecutorDeps, args: ToolArgs): ToolValue {
+function createText(deps: AiExecutorDeps, args: ToolArgs): Promise<ToolValue> {
   const editor = deps.editor;
   const text = requiredText(args);
   const scale = args.heading === true ? 2 : 1;
@@ -425,19 +470,27 @@ function createText(deps: AiExecutorDeps, args: ToolArgs): ToolValue {
   const h = Math.min(2000, lines * 36 * scale + 8);
   const at = planPlacement(editor, deps, args, w, h);
   const id = newShapeId();
-  editor.run(() => {
-    editor.createShape({
-      id,
-      type: 'text',
-      x: at.x,
-      y: at.y,
-      props: { richText: toRichText(text) as never, autoSize: true, scale },
-    });
-  });
-  return { created: id, x: round(at.x), y: round(at.y), w: round(w), h: round(h) };
+  const ghost = useAiGhostStore.getState().push([{ x: at.x, y: at.y, w, h }]);
+  return (async () => {
+    try {
+      await ghostDwell();
+      editor.run(() => {
+        editor.createShape({
+          id,
+          type: 'text',
+          x: at.x,
+          y: at.y,
+          props: { richText: toRichText(text) as never, autoSize: true, scale },
+        });
+      });
+    } finally {
+      useAiGhostStore.getState().remove(ghost);
+    }
+    return { created: id, x: round(at.x), y: round(at.y), w: round(w), h: round(h) };
+  })();
 }
 
-function createMathBlock(deps: AiExecutorDeps, args: ToolArgs): ToolValue {
+async function createMathBlock(deps: AiExecutorDeps, args: ToolArgs): Promise<ToolValue> {
   const editor = deps.editor;
   const latex = requiredText(args, 'latex');
   const w = widthArg(args, 160, 900, 320);
@@ -445,19 +498,25 @@ function createMathBlock(deps: AiExecutorDeps, args: ToolArgs): ToolValue {
   const h = lines > 1 ? Math.max(64, lines * 28 + 32) : 96;
   const at = planPlacement(editor, deps, args, w, h);
   const id = newShapeId();
-  editor.run(() => {
-    editor.createShape({
-      id,
-      type: 'math-block',
-      x: at.x,
-      y: at.y,
-      props: { w, h, latex },
+  const ghost = useAiGhostStore.getState().push([{ x: at.x, y: at.y, w, h }]);
+  try {
+    await ghostDwell();
+    editor.run(() => {
+      editor.createShape({
+        id,
+        type: 'math-block',
+        x: at.x,
+        y: at.y,
+        props: { w, h, latex },
+      });
     });
-  });
+  } finally {
+    useAiGhostStore.getState().remove(ghost);
+  }
   return { created: id, x: round(at.x), y: round(at.y), w: round(w), h: round(h) };
 }
 
-function createCodeBlock(deps: AiExecutorDeps, args: ToolArgs): ToolValue {
+async function createCodeBlock(deps: AiExecutorDeps, args: ToolArgs): Promise<ToolValue> {
   const editor = deps.editor;
   const code = requiredText(args, 'code');
   const language =
@@ -469,19 +528,26 @@ function createCodeBlock(deps: AiExecutorDeps, args: ToolArgs): ToolValue {
   const h = clamp(51 + textLines(code) * 21, 120, 2000);
   const at = planPlacement(editor, deps, args, w, Math.min(h, 400));
   const id = newShapeId();
-  editor.run(() => {
-    editor.createShape({
-      id,
-      type: 'code-block',
-      x: at.x,
-      y: at.y,
-      props: { w, h, code, language, fontSize: 13, autoHeight: true },
+  // Placement plans against the visible cap (400); the glow mirrors that.
+  const ghost = useAiGhostStore.getState().push([{ x: at.x, y: at.y, w, h: Math.min(h, 400) }]);
+  try {
+    await ghostDwell();
+    editor.run(() => {
+      editor.createShape({
+        id,
+        type: 'code-block',
+        x: at.x,
+        y: at.y,
+        props: { w, h, code, language, fontSize: 13, autoHeight: true },
+      });
     });
-  });
+  } finally {
+    useAiGhostStore.getState().remove(ghost);
+  }
   return { created: id, language, x: round(at.x), y: round(at.y), w: round(w), h: round(h) };
 }
 
-function createTable(deps: AiExecutorDeps, args: ToolArgs): ToolValue {
+async function createTable(deps: AiExecutorDeps, args: ToolArgs): Promise<ToolValue> {
   const editor = deps.editor;
   const markdown = args.markdown;
   if (typeof markdown !== 'string' || markdown.trim().length === 0) {
@@ -499,20 +565,26 @@ function createTable(deps: AiExecutorDeps, args: ToolArgs): ToolValue {
   const rowCount = parsed.rows.length || 1;
   const h = 60 + (rowCount + 1) * 46;
   const at = planPlacement(editor, deps, args, w, h);
-  let id: TLShapeId | null = null;
-  editor.run(() => {
-    createTableFromMarkdown(editor, parsed, { x: at.x, y: at.y }, w);
-    const selected = editor.getSelectedShapeIds()[0];
-    if (selected) id = selected;
-  });
-  if (!id) throw new Error('the table block was not created');
-  return {
-    created: id,
-    x: round(at.x),
-    y: round(at.y),
-    w: round(w),
-    h: round(h),
-  };
+  const ghost = useAiGhostStore.getState().push([{ x: at.x, y: at.y, w, h }]);
+  try {
+    await ghostDwell();
+    let id: TLShapeId | null = null;
+    editor.run(() => {
+      createTableFromMarkdown(editor, parsed, { x: at.x, y: at.y }, w);
+      const selected = editor.getSelectedShapeIds()[0];
+      if (selected) id = selected;
+    });
+    if (!id) throw new Error('the table block was not created');
+    return {
+      created: id,
+      x: round(at.x),
+      y: round(at.y),
+      w: round(w),
+      h: round(h),
+    };
+  } finally {
+    useAiGhostStore.getState().remove(ghost);
+  }
 }
 
 const CARD_VARIANTS = new Set(['note', 'info', 'tip', 'success', 'warning', 'danger']);
@@ -528,7 +600,7 @@ const CARD_DEFAULT_ICON: Record<string, string> = {
   danger: 'danger',
 };
 
-function createCard(deps: AiExecutorDeps, args: ToolArgs): ToolValue {
+async function createCard(deps: AiExecutorDeps, args: ToolArgs): Promise<ToolValue> {
   const editor = deps.editor;
   const title = requiredText(args, 'title');
   const body = typeof args.body === 'string' ? args.body : '';
@@ -542,32 +614,38 @@ function createCard(deps: AiExecutorDeps, args: ToolArgs): ToolValue {
   const h = clamp(textLines(body) * 26 + (badge ? 92 : 64), 64, 1200);
   const at = planPlacement(editor, deps, args, w, Math.min(h, 320));
   const id = newShapeId();
-  editor.run(() => {
-    editor.createShape({
-      id,
-      type: 'callout-card',
-      x: at.x,
-      y: at.y,
-      props: {
-        w,
-        h,
-        variant,
-        icon,
-        title: buildRichDocument(title) as never,
-        badge: buildRichDocument(badge) as never,
-        body: buildRichDocument(body) as never,
-        showIcon: true,
-        showBadge: Boolean(badge),
-        tinted: false,
-        collapsed: false,
-      },
+  // Placement plans against the visible cap (320); the glow mirrors that.
+  const ghost = useAiGhostStore.getState().push([{ x: at.x, y: at.y, w, h: Math.min(h, 320) }]);
+  try {
+    await ghostDwell();
+    editor.run(() => {
+      editor.createShape({
+        id,
+        type: 'callout-card',
+        x: at.x,
+        y: at.y,
+        props: {
+          w,
+          h,
+          variant,
+          icon,
+          title: buildRichDocument(title) as never,
+          badge: buildRichDocument(badge) as never,
+          body: buildRichDocument(body) as never,
+          showIcon: true,
+          showBadge: Boolean(badge),
+          tinted: false,
+          collapsed: false,
+        },
+      });
     });
-  });
+  } finally {
+    useAiGhostStore.getState().remove(ghost);
+  }
   return { created: id, variant, icon, x: round(at.x), y: round(at.y), w: round(w), h: round(h) };
 }
 
-async function createSvg(deps: AiExecutorDeps, args: ToolArgs): Promise<ToolValue> {
-  const editor = deps.editor;
+async function createSvg(deps: AiExecutorDeps, args: ToolArgs): Promise<ToolValue> {  const editor = deps.editor;
   const svg = requiredText(args, 'svg');
   const name = typeof args.name === 'string' ? args.name : '';
   const prepared = prepareSvg(svg);
@@ -578,15 +656,22 @@ async function createSvg(deps: AiExecutorDeps, args: ToolArgs): Promise<ToolValu
   const h = Math.round(w * prepared.ratio);
   const at = planPlacement(editor, deps, args, w, h);
   const id = newShapeId();
-  editor.run(() => {
-    editor.createShape({
-      id,
-      type: 'svg-diagram',
-      x: at.x,
-      y: at.y,
-      props: { svg: prepared.svg, ratio: prepared.ratio, draft: svg.trim(), h },
+  // The svg's own viewBox ratio is exactly what the ghost should glow at.
+  const ghost = useAiGhostStore.getState().push([{ x: at.x, y: at.y, w, h }]);
+  try {
+    await ghostDwell();
+    editor.run(() => {
+      editor.createShape({
+        id,
+        type: 'svg-diagram',
+        x: at.x,
+        y: at.y,
+        props: { svg: prepared.svg, ratio: prepared.ratio, draft: svg.trim(), h },
+      });
     });
-  });
+  } finally {
+    useAiGhostStore.getState().remove(ghost);
+  }
   return { created: id, name: name || null, x: round(at.x), y: round(at.y), w: round(w), h: round(h) };
 }
 
@@ -777,17 +862,30 @@ async function convertSelection(deps: AiExecutorDeps, args: ToolArgs): Promise<T
   }
   const pinned: ToolArgs = x === undefined ? args : { ...args, x, y };
 
-  const created = await createDiagram(deps, pinned);
+  // The whole converted area shimmers from here through the swap: each
+  // selected shape glows ON itself ("this stuff is being transformed") while
+  // the diagram is built (its own, same-art ghost glows among them with the
+  // new diagram's aspect ratio), and the glow only dissolves after the
+  // originals are gone.
+  const glow = perShapeBoxes(editor, selected.map((id) => id as TLShapeId));
+  const selectionGhost = glow.length > 0
+    ? useAiGhostStore.getState().push(glow.map((box) => ({ kind: 'edit' as const, ...box })))
+    : null;
+  try {
+    const created = await createDiagram(deps, pinned);
 
-  // Success is the delete trigger. Ids re-checked: anything the user removed
-  // mid-turn is skipped rather than resurrecting an error.
-  const stale = selected.filter((id) => !!editor.getShape(id as TLShapeId));
-  if (stale.length > 0) {
-    editor.run(() => {
-      editor.deleteShapes(stale.map((id) => id as TLShapeId));
-    });
+    // Success is the delete trigger. Ids re-checked: anything the user
+    // removed mid-turn is skipped rather than resurrecting an error.
+    const stale = selected.filter((id) => !!editor.getShape(id as TLShapeId));
+    if (stale.length > 0) {
+      editor.run(() => {
+        editor.deleteShapes(stale.map((id) => id as TLShapeId));
+      });
+    }
+    return { ...created, deleted: stale };
+  } finally {
+    if (selectionGhost) useAiGhostStore.getState().remove(selectionGhost);
   }
-  return { ...created, deleted: stale };
 }
 
 /** Rough planned footprint for one create_shapes entry. Placement only —
@@ -872,15 +970,12 @@ async function createShapes(deps: AiExecutorDeps, args: ToolArgs): Promise<ToolV
 
   const created: string[] = [];
   if (placements.length > 0) {
-    // One glow card over the whole committed batch: the ghost is the union
-    // of the exact boxes the loop is about to apply.
-    const minX = Math.min(...placements.map((p) => p.x));
-    const minY = Math.min(...placements.map((p) => p.y));
-    const maxX = Math.max(...placements.map((p, i) => p.x + ok[i].size.w));
-    const maxY = Math.max(...placements.map((p, i) => p.y + ok[i].size.h));
-    const ghostId = useAiGhostStore.getState().push([
-      { x: minX, y: minY, w: maxX - minX, h: maxY - minY },
-    ]);
+    // One glow per planned entry: each box carries the aspect ratio the
+    // model sized it with (the layer scales to screen; only the ratio
+    // matters). Committed as one batch so remove/clear stay atomic.
+    const ghostId = useAiGhostStore.getState().push(
+      placements.map((p, i) => ({ x: p.x, y: p.y, w: ok[i].size.w, h: ok[i].size.h })),
+    );
     try {
       await ghostDwell();
       editor.run(() => {
@@ -925,39 +1020,53 @@ const BOX_PROP_TYPES = new Set([
   'icon',
 ]);
 
-function updateShapes(editor: Editor, args: ToolArgs): ToolValue {
+/** update_shapes lays the shimmer on each shape it is about to change (the
+ *  user asked the AI to edit their selection — the shapes themselves are the
+ *  show). The glow wraps only the mutation: validation errors surface before
+ *  the dwell fires, so a rejected update never flashes a ghost. */
+async function updateShapes(editor: Editor, args: ToolArgs): Promise<ToolValue> {
   const entries = asArray(args, 'updates');
   const updated: string[] = [];
   const errors: string[] = [];
-  editor.run(() => {
-    for (const [index, entry] of entries.entries()) {
-      try {
-        if (typeof entry.id !== 'string' || !entry.id.startsWith('shape:')) {
-          throw new Error('every update needs a shape "id"');
+  const mutating = entries
+    .filter((entry) => typeof entry.id === 'string' && (entry.id as string).startsWith('shape:'))
+    .map((entry) => entry.id as TLShapeId);
+  const glow = mutating.length > 0 ? perShapeBoxes(editor, mutating) : [];
+  const ghost = glow.length > 0 ? useAiGhostStore.getState().push(glow.map((box) => ({ kind: 'edit' as const, ...box }))) : null;
+  try {
+    if (ghost) await ghostDwell();
+    editor.run(() => {
+      for (const [index, entry] of entries.entries()) {
+        try {
+          if (typeof entry.id !== 'string' || !entry.id.startsWith('shape:')) {
+            throw new Error('every update needs a shape "id"');
+          }
+          const shape = editor.getShape(entry.id as TLShapeId);
+          if (!shape) {
+            throw new Error(`no shape with id ${entry.id} on the active page`);
+          }
+          const { id, ...patch } = entry;
+          // Convenience: for box-shaped blocks sizes live under `props`; a
+          // top-level w/h is moved there instead of being silently ignored.
+          if (
+            BOX_PROP_TYPES.has(shape.type) &&
+            !(patch.props && typeof patch.props === 'object') &&
+            ('w' in patch || 'h' in patch)
+          ) {
+            patch.props = { w: patch.w, h: patch.h } as ToolArgs;
+            delete patch.w;
+            delete patch.h;
+          }
+          editor.updateShape({ id: id as TLShapeId, ...patch } as Parameters<Editor['updateShape']>[0]);
+          updated.push(id);
+        } catch (error) {
+          errors.push(`update ${index}: ${error instanceof Error ? error.message : String(error)}`);
         }
-        const shape = editor.getShape(entry.id as TLShapeId);
-        if (!shape) {
-          throw new Error(`no shape with id ${entry.id} on the active page`);
-        }
-        const { id, ...patch } = entry;
-        // Convenience: for box-shaped blocks sizes live under `props`; a
-        // top-level w/h is moved there instead of being silently ignored.
-        if (
-          BOX_PROP_TYPES.has(shape.type) &&
-          !(patch.props && typeof patch.props === 'object') &&
-          ('w' in patch || 'h' in patch)
-        ) {
-          patch.props = { w: patch.w, h: patch.h } as ToolArgs;
-          delete patch.w;
-          delete patch.h;
-        }
-        editor.updateShape({ id: id as TLShapeId, ...patch } as Parameters<Editor['updateShape']>[0]);
-        updated.push(id);
-      } catch (error) {
-        errors.push(`update ${index}: ${error instanceof Error ? error.message : String(error)}`);
       }
-    }
-  });
+    });
+  } finally {
+    if (ghost) useAiGhostStore.getState().remove(ghost);
+  }
   if (updated.length === 0 && errors.length > 0) {
     throw new Error(errors[0]);
   }
@@ -1001,11 +1110,23 @@ function deleteShapes(deps: AiExecutorDeps, args: ToolArgs): Promise<ToolValue> 
     deps.origin === 'assistant'
       ? confirmShapeDeletion(existing.length)
       : Promise.resolve(true);
-  return approved.then((ok) => {
+  return approved.then(async (ok) => {
     if (!ok) throw new Error('delete cancelled by the user');
-    editor.run(() => {
-      editor.deleteShapes(existing.map((id) => id as TLShapeId));
-    });
+    // Each shape about to disappear shimmers ON itself for its beat first
+    // (the honest "this is being transformed away" signal), then the
+    // deletion lands.
+    const glow = perShapeBoxes(editor, existing.map((id) => id as TLShapeId));
+    const ghost = glow.length > 0
+      ? useAiGhostStore.getState().push(glow.map((box) => ({ kind: 'edit' as const, ...box })))
+      : null;
+    try {
+      if (ghost) await ghostDwell();
+      editor.run(() => {
+        editor.deleteShapes(existing.map((id) => id as TLShapeId));
+      });
+    } finally {
+      if (ghost) useAiGhostStore.getState().remove(ghost);
+    }
     return { deleted: existing.map(String) } as ToolValue;
   });
 }
