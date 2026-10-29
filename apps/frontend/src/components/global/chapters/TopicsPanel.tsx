@@ -1,6 +1,8 @@
 import { useNavigate } from 'react-router-dom';
 import { ChevronRight, PanelLeftOpen, Plus } from 'lucide-react';
 import { timeAgo } from '@/lib/canvas';
+import { CanvasTypeIcon } from './CanvasTypeIcon';
+import { Empty, EmptyContent, EmptyHeader, EmptyMedia, EmptyTitle, EmptyDescription } from '@/components/ui/empty';
 import type { Chapter, Topic } from '@/lib/ipc';
 
 /** The right column of the notebook screen: the chapter's topic list. The
@@ -31,8 +33,20 @@ export function TopicsPanel({
 
   if (!chapter) {
     return (
-      <section className="flex min-w-0 flex-1 items-center justify-center py-40 text-sm text-fg-3">
-        {noChapters ? 'No chapters yet' : 'Select a chapter'}
+      <section className="flex min-w-0 flex-1 items-center justify-center py-24">
+        <Empty className="max-w-xs border-none bg-transparent p-4">
+          <EmptyHeader>
+            <EmptyMedia variant="icon">
+              <PanelLeftOpen strokeWidth={1.5} />
+            </EmptyMedia>
+            <EmptyTitle>{noChapters ? 'No chapters yet' : 'Select a chapter'}</EmptyTitle>
+            <EmptyDescription>
+              {noChapters
+                ? 'Create one to open your first canvas.'
+                : 'Pick a chapter on the left to see its topics.'}
+            </EmptyDescription>
+          </EmptyHeader>
+        </Empty>
       </section>
     );
   }
@@ -53,9 +67,12 @@ export function TopicsPanel({
             </button>
           )}
           <div className="min-w-0">
-            <h2 className="truncate text-[16px] font-medium leading-snug tracking-[-0.01em] text-fg-1">
-              {chapter.name}
-            </h2>
+            <div className="flex min-w-0 items-center gap-1.5">
+              <CanvasTypeIcon type={chapter.canvas_type} />
+              <h2 className="truncate text-[16px] font-medium leading-snug tracking-[-0.01em] text-fg-1">
+                {chapter.name}
+              </h2>
+            </div>
             {/*<p className="mt-0.5 text-[13px] text-fg-3 tabular-nums">
               {chapter.topics_count} {chapter.topics_count === 1 ? 'topic' : 'topics'} · edited{' '}
               {timeAgo(chapter.updated_at)}
@@ -75,17 +92,24 @@ export function TopicsPanel({
         {topics === null && <p className="px-3 pt-4 text-sm text-fg-3">Loading…</p>}
         {topics?.length === 0 && (
           <div className="pt-4">
-            <div className="flex h-11 items-center gap-3 px-3 text-sm text-fg-3">
-              {hasSearch ? 'No topics match' : 'No topics yet'}
-            </div>
-            {!hasSearch && (
-              <button
-                onClick={onCreateTopic}
-                className="mt-2 ml-3 inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-sm text-iris transition-colors duration-150 hover:bg-white/[0.04]"
-              >
-                <Plus className="h-3.5 w-3.5" strokeWidth={1.5} /> New topic
-              </button>
-            )}
+            <Empty className="p-6">
+              <EmptyHeader>
+                <EmptyTitle>{hasSearch ? 'No topics match' : 'No topics yet'}</EmptyTitle>
+                <EmptyDescription>
+                  {hasSearch ? 'Try a different search.' : 'Topics are the pages of this canvas.'}
+                </EmptyDescription>
+              </EmptyHeader>
+              {!hasSearch && (
+                <EmptyContent>
+                  <button
+                    onClick={onCreateTopic}
+                    className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-sm text-fg-2 transition-colors duration-150 hover:bg-white/[0.04] hover:text-fg-1"
+                  >
+                    <Plus className="h-3.5 w-3.5" strokeWidth={1.5} /> New topic
+                  </button>
+                </EmptyContent>
+              )}
+            </Empty>
           </div>
         )}
         {topics?.map((topic, i) => (

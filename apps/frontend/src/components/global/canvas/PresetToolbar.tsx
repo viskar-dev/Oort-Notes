@@ -138,12 +138,18 @@ function PresetToolbar({ zoomMenu }: { zoomMenu?: React.ReactNode }) {
   );
   const dimmed = !hovered && !isActive && isSelectTool;
 
-  // apply the preset's defaults: font for new shapes, and M-size for new text
-  // (tldraw's text base is 24px, so scale = px / 24). Only for an assigned
-  // preset — the fallback strip is cosmetic and must not touch new shapes.
+  // apply the preset's defaults: font for new shapes, and M-size for new
+  // text (tldraw's text base is 24px, so scale = px / 24). The font always
+  // applies — without an assigned preset this sets Oort's default font
+  // (sans) instead of leaving tldraw's stock 'draw' as the default; the
+  // text-scale side effect stays preset-only (the fallback strip must not
+  // touch new-shape sizing).
   useEffect(() => {
+    editor.setStyleForNextShapes(
+      DefaultFontStyle,
+      presetConfig?.fonts.default ?? FALLBACK_CONFIG.fonts.default,
+    );
     if (!presetConfig) return;
-    editor.setStyleForNextShapes(DefaultFontStyle, presetConfig.fonts.default);
     const off = editor.sideEffects.registerBeforeCreateHandler('shape', (shape) => {
       if (shape.type !== 'text') return shape;
       return { ...shape, props: { ...(shape.props as object), scale: presetConfig.sizes.p / TEXT_BASE_PX } };

@@ -1,5 +1,6 @@
 import { PanelLeftClose, Plus } from 'lucide-react';
 import { ChapterRow } from './ChapterRow';
+import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from '@/components/ui/empty';
 import type { Chapter } from '@/lib/ipc';
 
 /** The left column of the notebook screen: hover-revealed "New chapter" and
@@ -61,9 +62,14 @@ export function ChaptersPanel({
       <div className="flex flex-col pb-4 pt-4">
         {items === null && <p className="px-2.5 py-6 text-sm text-fg-3">Loading…</p>}
         {items?.length === 0 && (
-          <p className="px-2.5 py-6 text-sm text-fg-3">
-            {hasSearch ? 'No matches' : 'No chapters yet'}
-          </p>
+          <Empty className="border-none bg-transparent p-2">
+            <EmptyHeader>
+              <EmptyTitle>{hasSearch ? 'No matching chapters' : 'No chapters yet'}</EmptyTitle>
+              <EmptyDescription>
+                {hasSearch ? 'Try a different search.' : 'Chapters are the canvases of this notebook.'}
+              </EmptyDescription>
+            </EmptyHeader>
+          </Empty>
         )}
         {items?.map((chapter, i) => (
           <ChapterRow

@@ -6,7 +6,9 @@ import {
   type ToolbarItemConfig,
 } from '@/constants/presets/catalog';
 
-/** A fresh preset config: every non-sample tool visible, nothing hidden. */
+/** A fresh preset config: every non-sample tool visible, nothing hidden.
+ *  New text defaults to sans — Oort's own default, not tldraw's stock
+ *  hand-drawn 'draw' font (draw stays available in the fonts tab). */
 export function defaultConfig(): PresetConfig {
   return {
     toolbar: TOOL_CATALOG.map((t) => ({
@@ -14,7 +16,7 @@ export function defaultConfig(): PresetConfig {
       visible: !['line', 'highlight', 'laser', 'frame'].includes(t.id),
     })),
     colors: { hidden: [], overrides: {} },
-    fonts: { default: 'draw' },
+    fonts: { default: 'sans' },
     sizes: { h1: 48, h2: 36, h3: 29, p: 24 },
   };
 }
