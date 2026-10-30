@@ -22,6 +22,7 @@ import { parseMarkdownTable, createTableFromMarkdown } from '@/features/canvas/t
 import { outlineShapes, fullShapeState } from './canvas-outline';
 import { buildRichDocument } from './rich-text';
 import { confirmShapeDeletion } from './confirm-store';
+import { sanitizeShapeProps } from './safe-shape-writes';
 import type { AiDestructivePolicy } from './policy-store';
 import { layoutDiagram } from './diagram-layout';
 import { useAiGhostStore, ghostConfig } from './ghost-store';
@@ -675,8 +676,11 @@ async function createSvg(deps: AiExecutorDeps, args: ToolArgs): Promise<ToolValu
   return { created: id, name: name || null, x: round(at.x), y: round(at.y), w: round(w), h: round(h) };
 }
 
-/** tldraw geo values for the schema's simple node kinds. */
-const GEO_KINDS = { rect: 'rectangle', round: 'roundRectangle', diamond: 'diamond' } as const;
+/** tldraw geo values for the schema's simple node kinds. tldraw v3 removed
+ *  'roundRectangle' from the geo enum (and geo shapes carry no corner-radius
+ *  prop in v3), so a "round" node is mapped to the plain rectangle; the
+ *  sanitizer is the backstop if a mapping ever drifts again. */
+const GEO_KINDS = { rect: 'rectangle', round: 'rectangle', diamond: 'diamond' } as const;
 
 async function createDiagram(deps: AiExecutorDeps, args: ToolArgs): Promise<ToolValue> {
   const editor = deps.editor;
@@ -735,39 +739,53 @@ async function createDiagram(deps: AiExecutorDeps, args: ToolArgs): Promise<Tool
     const createdNodes: TLShapeId[] = [];
     const createdArrows: TLShapeId[] = [];
     editor.run(() => {
+    // One broken node (or hallucinated prop value) must never abort the
+    // whole run — inside editor.run an uncaught throw rolls back AND raises
+    // the page-level error boundary. Each shape is validated against the
+    // live schema first (sanitizeShapeProps) and guarded separately; a node
+    // that still fails is skipped, and arrows referencing it are skipped
+    // with it (a binding to a missing shape would fail validation too).
+    const failedNodes = new Set<string>();
     for (const node of nodes) {
       const placement = layout.nodes.get(node.id)!;
       const scaleFactor = node.shape === 'diamond' ? 1.25 : 1;
       const w = placement.w * scaleFactor;
       const h = placement.h * scaleFactor;
       const id = newShapeId();
-      if (node.shape === 'note') {
-        editor.createShape({
-          id,
-          type: 'note',
-          x: placement.x + dx,
-          y: placement.y + dy,
-          props: { richText: toRichText(node.label) },
-        });
-      } else {
-        editor.createShape({
-          id,
-          type: 'geo',
-          x: placement.x + dx,
-          y: placement.y + dy,
-          props: {
-            geo: GEO_KINDS[node.shape],
-            w,
-            h,
-            richText: toRichText(node.label),
-          },
-        });
+      try {
+        if (node.shape === 'note') {
+          editor.createShape({
+            id,
+            type: 'note',
+            x: placement.x + dx,
+            y: placement.y + dy,
+            props: sanitizeShapeProps(editor, 'note', { richText: toRichText(node.label) }),
+          });
+        } else {
+          editor.createShape({
+            id,
+            type: 'geo',
+            x: placement.x + dx,
+            y: placement.y + dy,
+            props: sanitizeShapeProps(editor, 'geo', {
+              geo: GEO_KINDS[node.shape],
+              w,
+              h,
+              richText: toRichText(node.label),
+            }),
+          });
+        }
+      } catch {
+        failedNodes.add(node.id);
+        continue;
       }
       createdNodes.push(id);
     }
     for (const arrow of layout.arrows) {
+      if (failedNodes.has(arrow.from) || failedNodes.has(arrow.to)) continue;
       const id = newShapeId();
-      editor.createShape({
+      try {
+        editor.createShape({
         id,
         type: 'arrow',
         x: 0,
@@ -789,6 +807,11 @@ async function createDiagram(deps: AiExecutorDeps, args: ToolArgs): Promise<Tool
             type: 'arrow',
           });
         }
+      }
+      } catch {
+        // an uncaught error here would undo every node the batch already
+        // made; a lost edge is strictly better than a lost diagram
+        continue;
       }
       createdArrows.push(id);
     }
@@ -985,7 +1008,9 @@ async function createShapes(deps: AiExecutorDeps, args: ToolArgs): Promise<ToolV
               ? (entry.id as TLShapeId)
               : newShapeId();
             const { x, y } = placements[placeIndex];
-            editor.createShape({ id, type, x, y, props: entry.props && typeof entry.props === 'object' ? entry.props : {} } as Parameters<Editor['createShape']>[0]);
+            // free-form model props: validated against the live schema and
+            // repaired (default/drop) before the store ever sees them
+            editor.createShape({ id, type, x, y, props: sanitizeShapeProps(editor, type, entry.props) } as Parameters<Editor['createShape']>[0]);
             created.push(id);
           } catch (error) {
             errors.push(`shape ${index}: ${error instanceof Error ? error.message : String(error)}`);
