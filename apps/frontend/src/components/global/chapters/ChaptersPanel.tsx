@@ -10,7 +10,6 @@ import type { Chapter } from '@/lib/ipc';
 export function ChaptersPanel({
   items,
   selectedId,
-  hasSearch,
   onSelect,
   onCreate,
   onRename,
@@ -19,7 +18,6 @@ export function ChaptersPanel({
 }: {
   items: Chapter[] | null;
   selectedId: string | null;
-  hasSearch: boolean;
   onSelect: (chapterId: string) => void;
   onCreate: () => void;
   onRename: (chapter: Chapter) => void;
@@ -64,10 +62,8 @@ export function ChaptersPanel({
         {items?.length === 0 && (
           <Empty className="border-none bg-transparent p-2">
             <EmptyHeader>
-              <EmptyTitle>{hasSearch ? 'No matching chapters' : 'No chapters yet'}</EmptyTitle>
-              <EmptyDescription>
-                {hasSearch ? 'Try a different search.' : 'Chapters are the canvases of this notebook.'}
-              </EmptyDescription>
+              <EmptyTitle>No chapters yet</EmptyTitle>
+              <EmptyDescription>Chapters are the canvases of this notebook.</EmptyDescription>
             </EmptyHeader>
           </Empty>
         )}
