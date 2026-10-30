@@ -3,7 +3,6 @@ import { Eraser, X, ExternalLink, ArrowUp, Square } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { aiIsReadOnly, useAiStore, type ConversationEvent } from '../ai-store';
 import { useAiConfirmStore } from '../confirm-store';
-import { aiCancelTurn } from '../ai-ipc';
 import { Message, MessageContent, MessageResponse } from '@/components/ai-elements/message';
 import { Shimmer } from '@/components/ai-elements/shimmer';
 import { OortMark } from './ai-mark';
@@ -18,6 +17,7 @@ export function AiChatPanel() {
   const busy = useAiStore((s) => s.busy);
   const error = useAiStore((s) => s.error);
   const send = useAiStore((s) => s.send);
+  const requestStop = useAiStore((s) => s.requestStop);
   const clear = useAiStore((s) => s.clear);
   const draftRef = useRef<HTMLTextAreaElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -156,7 +156,7 @@ export function AiChatPanel() {
             onClick={
               busy
                 ? () => {
-                    void aiCancelTurn().catch(() => undefined);
+                    requestStop(); // also flips the backend turn flag
                     setCancelling(true);
                   }
                 : submit
