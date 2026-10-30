@@ -2,6 +2,14 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { ChevronLeft, ChevronRight, Plus } from 'lucide-react';
 import { Tldraw } from 'tldraw';
+import { getAssetUrlsByImport } from '@tldraw/assets/imports.vite';
+
+/** tldraw's static assets (toolbar icons, embed icons, shape fonts,
+ *  translations) bundled INTO the app instead of tldraw's public CDN — the
+ *  CDN default makes the canvas chrome render without any icons whenever
+ *  the desktop exe runs offline. `imports.vite` imports each file with
+ *  `?url`, so Vite hashes and emits them inside dist/ for Tauri to ship. */
+const ASSET_URLS = getAssetUrlsByImport();
 import { CodeBlockUtil } from '@/features/canvas/code-block/code-block-shape';
 import { SvgDiagramUtil } from '@/features/canvas/svg-diagram/svg-diagram-shape';
 import { MathBlockUtil } from '@/features/canvas/math-extension/math-block-shape';
@@ -283,6 +291,7 @@ export function CanvasShell({ notebook, chapter }: { notebook: Notebook; chapter
                   tools={[ComponentsTool]}
                   shapeUtils={[CodeBlockUtil, SvgDiagramUtil, MathBlockUtil, TableUtil, CalloutCardUtil, IconUtil]}
                   overrides={oortShortcutOverrides}
+                  assetUrls={ASSET_URLS}
                   textOptions={ui.textOptions}
                   onMount={(editor) => {
                     handleMount(editor);
