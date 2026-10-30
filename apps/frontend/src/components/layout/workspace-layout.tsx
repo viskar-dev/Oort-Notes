@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { Search, Settings } from 'lucide-react';
 import { isTauri } from '@tauri-apps/api/core';
+import { isMac } from '@/lib/platform';
 
 /** Shared width rhythm for the wide inner pages (chapters, settings). */
 export const APP_CONTAINER = 'mx-auto w-full max-w-7xl px-6 lg:px-8';
@@ -25,10 +26,6 @@ export type LayoutSearch = {
   onChange: (value: string) => void;
   placeholder: string;
 };
-
-function isMac(): boolean {
-  return typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform ?? navigator.userAgent);
-}
 
 /**
  * App chrome shared by the notebooks home, the chapters page and the
@@ -179,7 +176,7 @@ export function WorkspaceLayout({
                 </kbd>
               </div>
             ) : (
-              <>
+              <>hu
                 <button
                   type="button"
                   onClick={() =>

@@ -29,6 +29,9 @@ import { useChapterCanvas, SHEET_GAP, type CanvasDeeplink } from '@/hooks/canvas
 import { useChapterPreset } from '@/hooks/canvas/use-chapter-preset';
 import { usePageView } from '@/hooks/canvas/use-page-view';
 import { useCanvasUi } from '@/hooks/canvas/use-canvas-ui';
+import { oortShortcutOverrides } from '@/features/canvas/app-shortcut-overrides';
+import { canvasUiState } from '@/features/canvas/canvas-ui-state';
+import { appCombo } from '@/lib/platform';
 import type { Chapter, Notebook } from '@/lib/ipc';
 import { isTauri } from '@tauri-apps/api/core';
 
@@ -121,6 +124,13 @@ export function CanvasShell({ notebook, chapter }: { notebook: Notebook; chapter
   const ui = useCanvasUi({ isPageChapter, applyFitMode });
   const iconsOpen = useIconFinderStore((s) => s.open);
 
+  // mirror the settings card's open state for the dialog-registered tldraw
+  // shortcut actions (whose window-level capture handlers only run through
+  // this component); plain object write — no re-render involved
+  useEffect(() => {
+    canvasUiState.settingsOpen = settingsOpen;
+  }, [settingsOpen]);
+
   // dropping icon-finder results on the canvas: capture-phase listeners on
   // the canvas area so they run before tldraw's own drop handling and keep
   // external text drops (table paste etc.) untouched
@@ -153,16 +163,19 @@ export function CanvasShell({ notebook, chapter }: { notebook: Notebook; chapter
   }, [getEditor, pageView.viewMode]);
 
   // the icon finder keyboard command: ctrl/cmd+alt+I toggles the dialog.
-  // The match is ALSO on `e.code` so international layouts keep working: on
-  // many of them ctrl+alt is AltGr and the reported `e.key` is a composed
-  // character other than `i`, while the physical key stays KeyI. Capture
-  // phase + stopPropagation so tldraw never sees the combo; typing contexts
-  // (cell editors, words, own dialog inputs) stay untouched, and "cmd+i"
-  // (no alt) keeps italic.
+  // Cross-platform notes: both Cmd (mac) and Ctrl (win/linux) are accepted
+  // via `appCombo`, and AltGraph (which IS Ctrl+Alt on international
+  // Windows/Linux layouts) is inside that check so AltGr+I composing é/§
+  // etc. never opens the dialog. The match is ALSO on `e.code` so
+  // international layouts keep working: on many of them ctrl+alt is AltGr
+  // and the reported `e.key` is a composed character other than `i`, while
+  // the physical key stays KeyI. Capture phase + stopPropagation so tldraw
+  // never sees the combo; typing contexts (cell editors, words, own dialog
+  // inputs) stay untouched, and "cmd+i" (no alt) keeps italic.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const isI = e.code === 'KeyI' || e.key.toLowerCase() === 'i';
-      if (!isI || !(e.ctrlKey || e.metaKey) || !e.altKey) return;
+      if (!isI || !appCombo(e) || !e.altKey) return;
       const t = e.target as HTMLElement | null;
       if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
       const ed = getEditor();
@@ -176,16 +189,17 @@ export function CanvasShell({ notebook, chapter }: { notebook: Notebook; chapter
     return () => window.removeEventListener('keydown', onKey, true);
   }, [getEditor, pageView.viewMode, settingsOpen]);
 
-  // page view mode: page chapters only. Capture phase +
-  // stopPropagation so tldraw never sees it; typing contexts stay untouched,
-  // and the combo also works while IN view mode (whose header is hidden) to
-  // exit back — mirrors the Icon finder handler above, including the
+  // page view mode: page chapters only. Same cross-platform modifier model
+  // as the icon finder above (Ctrl or Cmd + Alt, AltGraph-safe). Capture
+  // phase + stopPropagation so tldraw never sees it; typing contexts stay
+  // untouched, and the combo also works while IN view mode (whose header is
+  // hidden) to exit back — mirrors the Icon finder handler, including the
   // AltGr-safe `e.code` match.
   useEffect(() => {
     if (!isPageChapter) return;
     const onKey = (e: KeyboardEvent) => {
       const isV = e.code === 'KeyV' || e.key.toLowerCase() === 'v';
-      if (!isV || !(e.ctrlKey || e.metaKey) || !e.altKey || e.shiftKey) return;
+      if (!isV || !appCombo(e) || !e.altKey || e.shiftKey) return;
       const t = e.target as HTMLElement | null;
       if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
       const ed = getEditor();
@@ -200,12 +214,13 @@ export function CanvasShell({ notebook, chapter }: { notebook: Notebook; chapter
 
   // the AI chat panel keyboard command: ctrl/cmd+alt+A toggles the chat
   // overlay (desktop only). Same capture-phase + e.code pattern as the icon
-  // finder above (AltGr-safe) so tldraw never sees the combo.
+  // finder above, with the shared AltGr-safe `appCombo` modifier check so
+  // tldraw never sees the combo and international AltGr always wins.
   useEffect(() => {
     if (!isTauri()) return;
     const onKey = (e: KeyboardEvent) => {
       const isA = e.code === 'KeyA' || e.key.toLowerCase() === 'a';
-      if (!isA || !(e.ctrlKey || e.metaKey) || !e.altKey) return;
+      if (!isA || !appCombo(e) || !e.altKey) return;
       const t = e.target as HTMLElement | null;
       if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
       const ed = getEditor();
@@ -267,6 +282,7 @@ export function CanvasShell({ notebook, chapter }: { notebook: Notebook; chapter
                 <Tldraw
                   tools={[ComponentsTool]}
                   shapeUtils={[CodeBlockUtil, SvgDiagramUtil, MathBlockUtil, TableUtil, CalloutCardUtil, IconUtil]}
+                  overrides={oortShortcutOverrides}
                   textOptions={ui.textOptions}
                   onMount={(editor) => {
                     handleMount(editor);
