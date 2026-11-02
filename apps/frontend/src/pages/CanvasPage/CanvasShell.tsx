@@ -2,14 +2,16 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { ChevronLeft, ChevronRight, Plus } from 'lucide-react';
 import { Tldraw } from 'tldraw';
-import { getAssetUrlsByImport } from '@tldraw/assets/imports.vite';
+import { getAssetUrls } from '@tldraw/assets/selfHosted';
 
 /** tldraw's static assets (toolbar icons, embed icons, shape fonts,
- *  translations) bundled INTO the app instead of tldraw's public CDN — the
- *  CDN default makes the canvas chrome render without any icons whenever
- *  the desktop exe runs offline. `imports.vite` imports each file with
- *  `?url`, so Vite hashes and emits them inside dist/ for Tauri to ship. */
-const ASSET_URLS = getAssetUrlsByImport();
+ *  translations) served from public/tldraw-assets — bundled into the app
+ *  instead of tldraw's public CDN, whose URLs make the desktop exe render
+ *  a chromeless canvas whenever it runs offline. Maintained by
+ *  `bun run assets:sync` against the pinned @tldraw/assets package; plain
+ *  base-joined URLs, deliberately OUTSIDE the bundler (the imports.vite
+ *  ?url route breaks the Windows dev server, os error 123). */
+const ASSET_URLS = getAssetUrls({ baseUrl: '/tldraw-assets' });
 import { CodeBlockUtil } from '@/features/canvas/code-block/code-block-shape';
 import { SvgDiagramUtil } from '@/features/canvas/svg-diagram/svg-diagram-shape';
 import { MathBlockUtil } from '@/features/canvas/math-extension/math-block-shape';
