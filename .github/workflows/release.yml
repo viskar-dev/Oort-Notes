@@ -102,6 +102,18 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      - name: Validate updater signing key
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          key="${TAURI_SIGNING_PRIVATE_KEY//$'\r'/}"
+          first_line="${key%%$'\n'*}"
+          if [[ "$first_line" != "untrusted comment: minisign"* ]]; then
+            echo "::error::TAURI_SIGNING_PRIVATE_KEY is malformed. Set it to the full contents of the .key file, starting with 'untrusted comment: minisign encrypted secret key' — not the file path and not only the base64 line."
+            exit 1
+          fi
+
       - uses: oven-sh/setup-bun@v2
 
       - uses: dtolnay/rust-toolchain@stable
