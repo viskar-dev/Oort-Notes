@@ -12,8 +12,6 @@
   "app": {
     "windows": [
       {
-
-
         "title": "desktop",
         "width": 800,
         "height": 600,
@@ -36,7 +34,7 @@
       "endpoints": [
         "https://github.com/viskar-dev/Oort-Notes/releases/latest/download/latest.json"
       ],
-      "pubkey": "PASTE_PUBLIC_KEY_HERE"
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDVBRkZEMjAwQzBFMjQyMjcKUldRblF1TEFBTkwvV3JzeHVEaXc5cWdlcitvRWFKdk15ajNCWWoyc00rNEMzWDJ0YVZiWGltbWcK"
     }
   },
   "bundle": {
