@@ -11,6 +11,11 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Public desktop OAuth client id, baked into the binary at compile time.
+# Set it under Settings -> Secrets and variables -> Actions -> Variables.
+env:
+  OORT_GOOGLE_CLIENT_ID: ${{ vars.OORT_GOOGLE_CLIENT_ID }}
+
 jobs:
   verify:
     strategy:
@@ -125,6 +130,15 @@ jobs:
         run: |
           bun install --cwd apps/frontend
           bun install --cwd apps/desktop
+
+      - name: Check Google Drive OAuth client
+        shell: bash
+        run: |
+          if [ -z "$OORT_GOOGLE_CLIENT_ID" ]; then
+            echo "::warning::OORT_GOOGLE_CLIENT_ID is not set. Builds will not include a default Google Drive client; users must paste one in Backup settings."
+          else
+            echo "Google Drive OAuth client ID is set."
+          fi
 
       - name: Validate updater signing key
         shell: bash
