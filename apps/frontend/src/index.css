@@ -436,6 +436,7 @@ body [data-tauri-plugin-decoration-root] [data-tauri-decoration-control],
 body [data-tauri-plugin-decoration-root] [data-tauri-decoration-platform] [data-tauri-decoration-control] {
   color: var(--color-fg-2);
   background: transparent;
+  height: var(--tauri-plugin-decoration-titlebar-height, 56px);
 }
 body [data-tauri-plugin-decoration-root] [data-tauri-decoration-control]:hover,
 body [data-tauri-plugin-decoration-root] [data-tauri-decoration-control][data-tauri-decoration-hover],

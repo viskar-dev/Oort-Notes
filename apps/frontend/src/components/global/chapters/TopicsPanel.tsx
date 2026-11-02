@@ -67,8 +67,11 @@ export function TopicsPanel({
             </button>
           )}
           <div className="min-w-0">
-            <div className="flex min-w-0 items-center gap-1.5">
-              <CanvasTypeIcon type={chapter.canvas_type} />
+            <div className="flex min-w-0 pl-2 items-center gap-1.5">
+              <div className="bg-canvas border rounded-full p-1 flex items-center justify-center">
+                <CanvasTypeIcon type={chapter.canvas_type} className='text-primary'  />
+
+              </div>
               <h2 className="truncate text-[16px] font-medium leading-snug tracking-[-0.01em] text-fg-1">
                 {chapter.name}
               </h2>
