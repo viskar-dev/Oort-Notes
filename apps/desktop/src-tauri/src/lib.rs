@@ -708,9 +708,22 @@ pub fn run() {
         // window chrome: must register before any webview is created
         .plugin(tauri_plugin_decoration::init())
         .plugin(tauri_plugin_sql::Builder::default().build())
+        .plugin(tauri_plugin_process::init())
         .setup(|app| {
+            // auto-update is a desktop-only concern
+            #[cfg(desktop)]
+            app.handle()
+                .plugin(tauri_plugin_updater::Builder::new().build())?;
+
+            let db_dir = app
+                .path()
+                .app_data_dir()
+                .expect("app data dir unavailable");
+            std::fs::create_dir_all(&db_dir).expect("create app data dir");
+
+            let database_url = format!("sqlite://{}", db_dir.join("oort.db").display());
             let pool = tauri::async_runtime::block_on(async {
-                note_core::init_pool("sqlite:oort.db")
+                note_core::init_pool(&database_url)
                     .await
                     .expect("failed to init database")
             });

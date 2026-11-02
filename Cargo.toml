@@ -23,7 +23,14 @@ uuid = { version = "1", features = ["v7"] }
 sqlx = { version = "0.8", features = ["sqlite", "runtime-tokio","migrate"] }
 thiserror = "2"
 anyhow = "1"
-reqwest = { version = "0.12", features = ["json"] }
+# rustls: keeps Linux builds free of a system OpenSSL requirement
+reqwest = { version = "0.12", default-features = false, features = [
+    "json",
+    "rustls-tls-native-roots",
+    "http2",
+    "charset",
+    "macos-system-configuration",
+] }
 tracing = "0.1"
 tracing-subscriber = "0.3"
 base64 = "0.22"
@@ -55,6 +62,9 @@ axum = "0.8"
 tauri = { version = "2", features = [] }
 tauri-plugin-sql = { version = "2", features = ["sqlite"] }
 tauri-plugin-opener = "2"
+# Auto-update: updater ships only with signed release artifacts
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
 
 
 [workspace.lints.clippy]

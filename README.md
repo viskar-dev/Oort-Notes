@@ -148,9 +148,11 @@ the binary so end users never configure anything.
 
 ### Prerequisites
 - [Bun](https://bun.sh) (JS runner/package manager)
-- [Rust](https://rustup.rs) with `stable` toolchain, and on Windows the
-  **MSVC build tools** (via Visual Studio Build Tools)
-- [WebView2](https://developer.microsoft.com/en-us/microsoft-edge/webview2/) runtime (pre-installed on Windows 11)
+- [Rust](https://rustup.rs) with the `stable` toolchain
+- **Windows:** MSVC build tools (Visual Studio Build Tools) and the
+  [WebView2](https://developer.microsoft.com/en-us/microsoft-edge/webview2/) runtime (pre-installed on Windows 11)
+- **macOS:** Xcode Command Line Tools — `xcode-select --install`
+- **Linux:** `libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libdbus-1-dev libxdo-dev`
 
 ### Development
 ```bash
@@ -168,17 +170,20 @@ For the web frontend only:
 bun run --cwd apps/frontend dev
 ```
 
-### Building installers (Windows)
+### Building installers
 ```bash
 cd apps/desktop
 # optional: bake your Google OAuth desktop client id in
 #   (create a "Desktop app" OAuth credential in Google Cloud Console)
-set OORT_GOOGLE_CLIENT_ID=....apps.googleusercontent.com
+export OORT_GOOGLE_CLIENT_ID=....apps.googleusercontent.com
 bunx tauri build
 ```
+(Windows cmd: `set OORT_GOOGLE_CLIENT_ID=...` instead of `export`.)
+
 Outputs:
-- `target/release/bundle/nsis/*-setup.exe` — installer
-- `target/release/bundle/msi/*.msi` — MSI package
+- Windows: `target/release/bundle/nsis/*-setup.exe` (installer), `target/release/bundle/msi/*.msi`
+- Linux: `target/release/bundle/deb/*.deb`, `target/release/bundle/rpm/*.rpm`, `target/release/bundle/appimage/*.AppImage`
+- macOS: `target/release/bundle/dmg/*.dmg`, `target/release/bundle/macos/*.app`
 
 ### Tests
 ```bash
