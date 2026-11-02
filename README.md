@@ -6,27 +6,27 @@
 
 A canvas notebook that thinks like an IDE and teaches like a tutor.
 
-<a href="releases/pre-release/Oort-Notes-0.1.0-x64-setup.exe"><img src="docs/assets/download-windows.svg" height="44" alt="Download Oort Notes for Windows — .exe installer" /></a>
+<a href="https://github.com/viskar-dev/Oort-Notes/releases/latest/download/Oort.Notes_0.1.0_x64-setup.exe"><img src="docs/assets/download-windows.svg" height="44" alt="Download Oort Notes for Windows — .exe installer" /></a>
 &nbsp;
-<a href="releases/pre-release/Oort-Notes-0.1.0-x64.msi"><img src="docs/assets/download-windows-msi.svg" height="44" alt="Download Oort Notes for Windows — MSI package" /></a>
+<a href="https://github.com/viskar-dev/Oort-Notes/releases/latest/download/Oort.Notes_0.1.0_x64_en-US.msi"><img src="docs/assets/download-windows-msi.svg" height="44" alt="Download Oort Notes for Windows — MSI package" /></a>
 
 <br />
 
-<a href="https://github.com/viskar-dev/Oort-Notes/releases"><img src="docs/assets/download-macos.svg" height="44" alt="Download Oort Notes for macOS" /></a>
+<a href="https://github.com/viskar-dev/Oort-Notes/releases/latest/download/Oort.Notes_0.1.0_aarch64.dmg"><img src="docs/assets/download-macos.svg" height="44" alt="Download Oort Notes for macOS — Apple Silicon" /></a>
 &nbsp;
-<a href="https://github.com/viskar-dev/Oort-Notes/releases"><img src="docs/assets/download-linux.svg" height="44" alt="Download Oort Notes for Linux" /></a>
+<a href="https://github.com/viskar-dev/Oort-Notes/releases/latest/download/Oort.Notes_0.1.0_amd64.AppImage"><img src="docs/assets/download-linux.svg" height="44" alt="Download Oort Notes for Linux — AppImage" /></a>
 
-**Pre-release v0.1.0** · Windows 10/11 · macOS · Linux
+**Release v0.1.0** · Windows 10/11 · macOS · Linux
 <br />
-<sub>Windows is a direct download. macOS (.dmg) and Linux (AppImage, .deb, .rpm) packages are attached to the <a href="https://github.com/viskar-dev/Oort-Notes/releases">GitHub release</a>.</sub>
+<sub>Every button downloads directly. Also: <a href="https://github.com/viskar-dev/Oort-Notes/releases/latest/download/Oort.Notes_0.1.0_x64.dmg">Intel Mac .dmg</a> · <a href="https://github.com/viskar-dev/Oort-Notes/releases/latest/download/Oort.Notes_0.1.0_amd64.deb">Linux .deb</a> · <a href="https://github.com/viskar-dev/Oort-Notes/releases/latest/download/Oort.Notes-0.1.0-1.x86_64.rpm">Linux .rpm</a> · <a href="https://github.com/viskar-dev/Oort-Notes/releases/tag/v0.1.0">all files</a></sub>
 
 </div>
 
 ## Platform notes
 
 - **Windows 10/11 (x64):** run the `.exe` installer; the `.msi` is for managed or silent installs.
-- **macOS (Apple Silicon / Intel):** pick the matching `.dmg` from the release. Builds are unsigned for now — on first launch, right-click the app and choose **Open**.
-- **Linux (x64):** use the AppImage (run `chmod +x` first), or install the `.deb` / `.rpm` package.
+- **macOS (Apple Silicon / Intel):** the macOS button downloads the Apple Silicon `.dmg`; Intel users can use the `.dmg` link below it. Builds are unsigned for now — on first launch, right-click the app and choose **Open**.
+- **Linux (x64):** the Linux button downloads the AppImage (run `chmod +x` first); `.deb` and `.rpm` links are below it.
 
 ## Why Oort Notes
 
@@ -139,5 +139,5 @@ cargo test -p note-core
 
 ## Status
 
-- **v0.1.0 (pre-release)** — Windows, macOS and Linux packages. Feedback is welcome via [issues](https://github.com/viskar-dev/Oort-Notes/issues).
+- **v0.1.0** — Windows, macOS and Linux packages. Feedback is welcome via [issues](https://github.com/viskar-dev/Oort-Notes/issues).
 - More components and additional release channels are next.
