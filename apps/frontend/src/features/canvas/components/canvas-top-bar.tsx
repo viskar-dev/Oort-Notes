@@ -1,6 +1,10 @@
 import { ChevronLeft, Settings, Sparkles } from 'lucide-react';
 import { useEffect, useState, type RefObject } from 'react';
 import { isTauri } from '@tauri-apps/api/core';
+import { kbdHint } from '@/lib/platform';
+
+/** Tooltip hint for the AI toggle, rendered per platform (⌥⌘A on macOS). */
+const AI_ASSISTANT_HINT = kbdHint('cmd+alt+a');
 
 /** Height of the hover band that reveals the canvas chrome (h-8). Keep the
  *  bar's class (h-8) and the runtime caption-strip height below in sync
@@ -113,7 +117,7 @@ export function CanvasTopBar({
           <div className="flex items-center gap-1.5">
             {onOpenAi && (
               <button
-                title="AI assistant (Ctrl+Alt+A)"
+                title={`AI assistant (${AI_ASSISTANT_HINT})`}
                 onClick={onOpenAi}
                 className="rounded-md p-2 text-muted-foreground transition-colors hover:bg-raised hover:text-primary"
               >
@@ -171,7 +175,7 @@ export function CanvasTopBar({
           <div className="flex shrink-0 items-center gap-1.5">
             {onOpenAi && (
               <button
-                title="AI assistant (Ctrl+Alt+A)"
+                title={`AI assistant (${AI_ASSISTANT_HINT})`}
                 onClick={onOpenAi}
                 className="rounded-md p-2 text-muted-foreground transition-colors hover:bg-raised hover:text-primary"
               >

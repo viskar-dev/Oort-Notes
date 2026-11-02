@@ -13,6 +13,7 @@ import {
 import { Plus, Trash2 } from 'lucide-react';
 import { api, type UiPreset } from '@/lib/ipc';
 import { SettingsLayout } from '@/components/layout/settings-layout';
+import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from '@/components/ui/empty';
 import { errorText } from '@/lib/utils';
 import { toast } from 'sonner';
 
@@ -74,12 +75,14 @@ export function SettingsPage() {
       {presets === null && <p className="text-sm text-muted-foreground">Loading…</p>}
 
       {presets?.length === 0 && (
-        <div className="rounded-xl border border-line bg-surface px-6 py-12 text-center">
-          <div className="mb-1 text-base font-medium">No presets yet</div>
-          <div className="text-sm text-muted-foreground">
-            Create a preset to customize how your canvases look and feel.
-          </div>
-        </div>
+        <Empty className="py-14">
+          <EmptyHeader>
+            <EmptyTitle>No presets yet</EmptyTitle>
+            <EmptyDescription>
+              Create a preset to customize how your canvases look and feel.
+            </EmptyDescription>
+          </EmptyHeader>
+        </Empty>
       )}
 
       <div className="flex flex-col gap-2">
@@ -115,7 +118,7 @@ export function SettingsPage() {
           <AlertDialogHeader>
             <AlertDialogTitle>Delete "{deleting?.name}"?</AlertDialogTitle>
             <AlertDialogDescription>
-              Chapters using this preset fall back to the tldraw defaults. This
+              Chapters using this preset fall back to Oort's defaults. This
               cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>

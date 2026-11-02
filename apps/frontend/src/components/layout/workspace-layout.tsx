@@ -2,6 +2,8 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { Search, Settings } from 'lucide-react';
 import { isTauri } from '@tauri-apps/api/core';
+import { isMac } from '@/lib/platform';
+import { UpdateBanner } from './update-banner';
 
 /** Shared width rhythm for the wide inner pages (chapters, settings). */
 export const APP_CONTAINER = 'mx-auto w-full max-w-7xl px-6 lg:px-8';
@@ -25,10 +27,6 @@ export type LayoutSearch = {
   onChange: (value: string) => void;
   placeholder: string;
 };
-
-function isMac(): boolean {
-  return typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform ?? navigator.userAgent);
-}
 
 /**
  * App chrome shared by the notebooks home, the chapters page and the
@@ -180,7 +178,7 @@ export function WorkspaceLayout({
               </div>
             ) : (
               <>
-                <button
+                {/*<button
                   type="button"
                   onClick={() =>
                     search
@@ -194,10 +192,10 @@ export function WorkspaceLayout({
                 </button>
                 <kbd className="hidden h-5 items-center rounded border border-white/[0.08] px-1.5 font-sans text-[11px] text-fg-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] sm:flex">
                   {isMac() ? '⌘ K' : 'Ctrl K'}
-                </kbd>
+                </kbd>*/}
               </>
             )}
-            <span aria-hidden className="hidden h-4 w-px bg-white/[0.08] sm:block" />
+            {/*<span aria-hidden className="hidden h-4 w-px bg-white/[0.08] sm:block" />*/}
             <Link
               to="/settings"
               aria-label="Settings"
@@ -215,11 +213,13 @@ export function WorkspaceLayout({
           {isTauri() && (
             <div
               aria-hidden
-              className="h-14 shrink-0"
+              className="h-14 shrink-0 "
               style={{ width: 'var(--tauri-plugin-decoration-right-clearance, 0px)' }}
             />
           )}
         </div>
+
+        <UpdateBanner container={container} />
       </header>
 
       <div className="flex min-h-0 flex-1 flex-col">{children}</div>

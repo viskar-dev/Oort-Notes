@@ -1,29 +1,53 @@
-import { MoreVertical } from 'lucide-react';
+import { useEffect, useRef } from 'react';
+import { MoreVertical, Search } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { HOME_CONTAINER } from '@/components/layout/workspace-layout';
+import {
+  HOME_CONTAINER,
+  SEARCH_FOCUS_EVENT,
+  type LayoutSearch,
+} from '@/components/layout/workspace-layout';
 import type { Chapter, Notebook } from '@/lib/ipc';
 
 /** Page header: the notebook name, its counters and the notebook ⋮ menu
  *  (rename/delete). The full-wrapper hairline under it comes from the grid
- *  section in ChaptersPage, forming the T with the column divider. */
+ *  section in ChaptersPage, forming the T with the column divider. The
+ *  search field re-houses the layout's navbar search (same skin as the
+ *  notebooks home's filter row) so it sits at the right end of this row,
+ *  vertically aligned with the notebook name. */
 export function ChaptersHeader({
   notebook,
   chapters,
   totalTopics,
+  search,
   onRename,
   onDelete,
 }: {
   notebook: Notebook;
   chapters: Chapter[] | null;
   totalTopics: number;
+  /** Same search state the layout's navbar field used to receive; omitting
+   *  it keeps the header search-less (and ⌘K dispatches with no target). */
+  search?: LayoutSearch;
   onRename: () => void;
   onDelete: () => void;
 }) {
+  const searchRef = useRef<HTMLInputElement>(null);
+
+  // ⌘K / the top-bar search icon land in this input: with no navbar field
+  // WorkspaceLayout re-targets the page by dispatching this event (same
+  // contract the notebooks home's filter row listens on)
+  useEffect(() => {
+    if (!search) return;
+    const onFocus = () => searchRef.current?.focus();
+    window.addEventListener(SEARCH_FOCUS_EVENT, onFocus);
+    return () => window.removeEventListener(SEARCH_FOCUS_EVENT, onFocus);
+  }, [search]);
+
   return (
     <div className={HOME_CONTAINER}>
       <div className="flex items-start justify-between pt-10 pb-8">
@@ -37,7 +61,22 @@ export function ChaptersHeader({
               : `${chapters.length} ${chapters.length === 1 ? 'chapter' : 'chapters'} · ${totalTopics} ${totalTopics === 1 ? 'topic' : 'topics'}`}
           </p>
         </div>
-        <DropdownMenu>
+        <div className="flex items-center gap-3 pt-1">
+          {search && (
+            <label className="flex h-8 items-center gap-2">
+              <Search className="h-3.5 w-3.5 shrink-0 text-fg-3" strokeWidth={1.5} aria-hidden />
+              <input
+                ref={searchRef}
+                value={search.value}
+                onChange={(e) => search.onChange(e.target.value)}
+                placeholder="Search topics..."
+                className="w-40 bg-transparent text-sm text-fg-1 outline-none transition-[width] duration-150 focus:w-52 placeholder:text-fg-3"
+                aria-label={search.placeholder}
+              />
+            </label>
+          )}
+          <span aria-hidden className="h-5 w-px bg-white/[0.06]" />
+          <DropdownMenu>
           <DropdownMenuTrigger
             render={
               <button
@@ -61,6 +100,7 @@ export function ChaptersHeader({
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
+        </div>
       </div>
     </div>
   );

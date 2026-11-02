@@ -10,6 +10,7 @@ import {
 } from 'tldraw';
 import type { TLUiContextMenuProps } from 'tldraw';
 import { isTauri } from '@tauri-apps/api/core';
+import { isMac } from '@/lib/platform';
 import { useIconFinderStore } from '@/stores/icon-finder-store';
 import { useAiCanvasPromptStore } from '@/features/ai/canvas-prompt-store';
 import { OortContextMenuContentWithPdf } from '@/components/global/canvas/ExportAsMenu';
@@ -21,7 +22,7 @@ import { OortContextMenuContentWithPdf } from '@/components/global/canvas/Export
  * group (not a tool; it opens the search dialog). Hidden in view mode the
  * same way every other editing affordance is hidden there.
  * The kbd hint needs tldraw's lowercase binding grammar — "ctrl+alt+i" —
- * which it renders as Ctrl + Alt + I (⌘⌥I on mac).
+ * which it renders as Ctrl + Alt + I (⌥⌘I on mac, chosen with isMac()).
  */
 function OortContextMenuContent() {
   const editor = useEditor();
@@ -50,7 +51,7 @@ function OortContextMenuContent() {
           <TldrawUiMenuItem
             id="oort-icon-finder"
             label="Icon finder"
-            kbd="ctrl+alt+i"
+            kbd={isMac() ? 'cmd+alt+i' : 'ctrl+alt+i'}
             onSelect={() => useIconFinderStore.getState().setOpen(true)}
           />
         </TldrawUiMenuGroup>

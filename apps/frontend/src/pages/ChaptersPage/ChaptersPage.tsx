@@ -58,11 +58,6 @@ export function ChaptersPage() {
   return (
     <WorkspaceLayout
       container={HOME_CONTAINER}
-      search={{
-        value: data.search,
-        onChange: data.setSearch,
-        placeholder: 'Search chapters and topics',
-      }}
       crumbs={[{ label: 'Notebooks', to: '/' }, { label: notebook.name }]}
       showFooter={false}
       syncDot
@@ -72,6 +67,11 @@ export function ChaptersPage() {
           notebook={notebook}
           chapters={data.chapters}
           totalTopics={data.totalTopics}
+          search={{
+            value: data.search,
+            onChange: data.setSearch,
+            placeholder: 'Search topics',
+          }}
           onRename={dialogs.openRenameNotebook}
           onDelete={() => dialogs.setDeletingNotebook(notebook)}
         />
@@ -87,9 +87,9 @@ export function ChaptersPage() {
 
       {/* <768px: chapters become horizontally scrolling selection chips */}
       <div className={`${HOME_CONTAINER} md:hidden`}>
-        {data.filteredChapters && data.filteredChapters.length > 0 && (
+        {data.chapters && data.chapters.length > 0 && (
           <div className="flex gap-2 overflow-x-auto pb-4">
-            {data.filteredChapters.map((chapter, i) => (
+            {data.chapters.map((chapter, i) => (
               <button
                 key={chapter.id}
                 onClick={() => data.setSelectedId(chapter.id)}
@@ -128,9 +128,8 @@ export function ChaptersPage() {
             }`}
           >
             <ChaptersPanel
-              items={data.filteredChapters}
+              items={data.chapters}
               selectedId={data.selected?.id ?? null}
-              hasSearch={data.search.trim() !== ''}
               onSelect={data.setSelectedId}
               onCreate={dialogs.openCreateChapter}
               onRename={dialogs.setRenamingChapter}
@@ -146,7 +145,7 @@ export function ChaptersPage() {
               topics={data.filteredTopics}
               chapterIndex={data.chapterIndex}
               hasSearch={data.search.trim() !== ''}
-              noChapters={data.filteredChapters?.length === 0}
+              noChapters={data.chapters?.length === 0}
               onCreateTopic={() => dialogs.setCreatingTopic(true)}
               collapsed={collapsed}
               onExpand={() => setCollapsed(false)}

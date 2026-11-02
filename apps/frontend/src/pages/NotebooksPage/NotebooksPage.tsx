@@ -28,8 +28,18 @@ export function NotebooksPage() {
     onError: (message) => toast.error('Notebook action failed', { description: message }),
   });
 
-  // presentation-only view state: same data and handlers in two skins
-  const [view, setView] = useState<'list' | 'grid'>('list');
+  // presentation-only view state: same data and handlers in two skins.
+  // Persisted (localStorage, same pattern as the canvas page-padding keys):
+  // the page unmounts while you're inside a notebook, and coming back must
+  // keep the view you left with instead of snapping to list.
+  const [view, setView] = useState<'list' | 'grid'>(() => {
+    const stored = localStorage.getItem('oort:notebook-view');
+    return stored === 'grid' ? 'grid' : 'list';
+  });
+  const changeView = useCallback((next: 'list' | 'grid') => {
+    setView(next);
+    localStorage.setItem('oort:notebook-view', next);
+  }, []);
 
   const handleUpdate = useCallback(async (nb: Notebook, flags: NotebookFlagChanges) => {
     try {
@@ -86,7 +96,7 @@ export function NotebooksPage() {
           sort={list.sort}
           search={search}
           view={view}
-          onViewChange={setView}
+          onViewChange={changeView}
           count={list.notebooks === null ? undefined : notebooks.length}
           onFilterChange={list.setFilter}
           onSortChange={list.setSort}

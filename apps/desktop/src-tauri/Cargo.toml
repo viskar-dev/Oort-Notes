@@ -31,6 +31,9 @@ axum.workspace = true
 rand.workspace = true
 # native window caption panel (minimize/restore/close overlay)
 tauri-plugin-decoration = "3"
+# auto-update (updater: desktop targets only, see setup in lib.rs)
+tauri-plugin-updater.workspace = true
+tauri-plugin-process.workspace = true
 
 [lints]
 workspace = true

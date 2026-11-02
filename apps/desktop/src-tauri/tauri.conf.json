@@ -12,6 +12,8 @@
   "app": {
     "windows": [
       {
+
+
         "title": "desktop",
         "width": 800,
         "height": 600,
@@ -22,14 +24,24 @@
         "theme": "Dark",
         "zoomHotkeysEnabled": true,
         "dragDropEnabled": false
+
       }
     ],
     "security": {
       "csp": null
     }
   },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://github.com/viskar-dev/Oort-Notes/releases/latest/download/latest.json"
+      ],
+      "pubkey": "PASTE_PUBLIC_KEY_HERE"
+    }
+  },
   "bundle": {
     "active": true,
+    "createUpdaterArtifacts": true,
     "targets": "all",
     "icon": [
       "icons/32x32.png",

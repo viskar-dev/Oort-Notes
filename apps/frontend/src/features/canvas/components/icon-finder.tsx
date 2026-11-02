@@ -7,6 +7,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from '@/components/ui/empty';
 import {
   iconView,
   loadIconSet,
@@ -241,7 +242,12 @@ export function IconFinder({ open, onClose }: { open: boolean; onClose: () => vo
           ))}
 
           {result && !busy && groups.length === 0 && (
-            <div className="px-1 pt-6 text-sm text-muted-foreground">No icons match “{term.trim()}”.</div>
+            <Empty className="my-6 border-none bg-transparent">
+              <EmptyHeader>
+                <EmptyTitle>No icons match “{term.trim()}”</EmptyTitle>
+                <EmptyDescription>Try a shorter or different keyword.</EmptyDescription>
+              </EmptyHeader>
+            </Empty>
           )}
         </div>
       </DialogContent>

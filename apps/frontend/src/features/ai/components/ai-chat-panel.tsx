@@ -3,7 +3,6 @@ import { Eraser, X, ExternalLink, ArrowUp, Square } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { aiIsReadOnly, useAiStore, type ConversationEvent } from '../ai-store';
 import { useAiConfirmStore } from '../confirm-store';
-import { aiCancelTurn } from '../ai-ipc';
 import { Message, MessageContent, MessageResponse } from '@/components/ai-elements/message';
 import { Shimmer } from '@/components/ai-elements/shimmer';
 import { OortMark } from './ai-mark';
@@ -18,6 +17,7 @@ export function AiChatPanel() {
   const busy = useAiStore((s) => s.busy);
   const error = useAiStore((s) => s.error);
   const send = useAiStore((s) => s.send);
+  const requestStop = useAiStore((s) => s.requestStop);
   const clear = useAiStore((s) => s.clear);
   const draftRef = useRef<HTMLTextAreaElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -119,11 +119,6 @@ export function AiChatPanel() {
             <Shimmer className="text-xs">{cancelling ? 'cancelling…' : 'working…'}</Shimmer>
           </div>
         )}
-        {error && (
-          <div className="my-2 rounded-lg bg-red-950/80 px-3 py-2 text-xs text-red-300">
-            {error}
-          </div>
-        )}
       </div>
 
       {/* composer pill: the mark on the front, then the (smarter) input —
@@ -156,7 +151,7 @@ export function AiChatPanel() {
             onClick={
               busy
                 ? () => {
-                    void aiCancelTurn().catch(() => undefined);
+                    requestStop(); // also flips the backend turn flag
                     setCancelling(true);
                   }
                 : submit

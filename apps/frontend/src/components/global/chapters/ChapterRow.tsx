@@ -7,6 +7,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { accentOpacity } from '@/components/global/notebooks/notebook-utils';
+import { CanvasTypeIcon } from './CanvasTypeIcon';
 import type { Chapter } from '@/lib/ipc';
 
 /** One chapter row (h-11): number slot, name, and one right slot that shows
@@ -72,8 +73,10 @@ export function ChapterRow({
         {chapter.name}
       </span>
 
-      {/* count ⋄ menu: one reserved slot; hover swaps the count for the menu */}
-      <span className="relative grid h-7 w-7 shrink-0 place-items-center">
+      {/* canvas type + count ⋄ menu: one reserved slot; the tiny type icon
+          sits left of the count and hover swaps both for the menu */}
+      <span className="relative grid h-7 shrink-0 place-items-center gap-1.5 grid-flow-col pr-1.5">
+        <CanvasTypeIcon type={chapter.canvas_type} className="group-hover:opacity-0 transition-opacity duration-100" />
         <span
           className={`text-xs text-fg-3 tabular-nums transition-opacity duration-100 ${
             active ? 'opacity-100 group-hover:opacity-0' : 'group-hover:opacity-0'

@@ -1,6 +1,8 @@
+import { toast } from 'sonner';
 import { create } from 'zustand';
-import { aiChat, listenAiTurnEvents, type AiAgentEvent, type AiHistoryMessage } from './ai-ipc';
+import { aiCancelTurn, aiChat, listenAiTurnEvents, type AiAgentEvent, type AiHistoryMessage } from './ai-ipc';
 import { useAiGhostStore } from './ghost-store';
+import { isTransientAiError, AI_TURN_RETRY_DELAYS_MS } from './turn-retry';
 import { useViewModeStore } from '@/stores/view-mode-store';
 
 /**
@@ -20,8 +22,17 @@ interface AiState {
   events: ConversationEvent[];
   /** A turn is being awaited (send button spins, input disabled). */
   busy: boolean;
-  /** Transport/turn failure shown at the bottom of the transcript. */
+  /** Last turn failure. Never rendered as a card — the store toasts it;
+   *  kept in state for logic that must know a turn failed (the canvas
+   *  prompt's open-on-question decision). */
   error: string | null;
+
+  /** Press Stop while a turn runs — including while it is quietly retrying
+   *  a transient failure (see `send`): prevents the pending retry from
+   *  spawning a fresh request and ends the turn as a quiet stop. */
+  requestStop: () => void;
+  /** Set by requestStop; consumed + cleared per turn. */
+  stopRequested: boolean;
 
   /** One turn runs at a time; later requests (chat panel or the canvas
    *  prompt) queue behind the current one instead of being dropped. */
@@ -64,6 +75,8 @@ export function settleTurn(
  *  catches its own failures. */
 let turnChain: Promise<void> = Promise.resolve();
 
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
 export const useAiStore = create<AiState>((set, get) => ({
   open: false,
   setOpen: (open) => set({ open, error: open ? null : get().error }),
@@ -72,12 +85,22 @@ export const useAiStore = create<AiState>((set, get) => ({
   events: [],
   busy: false,
   error: null,
+  stopRequested: false,
+
+  requestStop: () => {
+    set({ stopRequested: true });
+    // The backend flag only matters while the invoke is actually running;
+    // it is reset at every fresh turn start, which is exactly why the
+    // frontend bookkeeping must live here (a retry after a Stop press
+    // would otherwise begin a brand-new turn).
+    void aiCancelTurn().catch(() => undefined);
+  },
 
   send: (userMessage, context) => {
     const text = userMessage.trim();
     if (text.length === 0) return turnChain;
     const turn = async () => {
-      set({ busy: true, error: null });
+      set({ busy: true, error: null, stopRequested: false });
       const withPrompt: ConversationEvent[] = [...get().events, { kind: 'user', text }];
       set({ events: withPrompt });
       // Subscribe BEFORE the invoke: event delivery races the final list.
@@ -86,16 +109,57 @@ export const useAiStore = create<AiState>((set, get) => ({
         set({ events: [...get().events, { kind: 'agent' as const, ...event }] });
       });
       try {
-        const agentEvents = await aiChat(historyOf(withPrompt), text, context);
-        // Stop the stream before settling: a straggler payload that arrives
-        // between the invoke resolving and this point must not append after
-        // the authoritative replace and duplicate the tail.
-        unlisten();
-        set({ events: settleTurn(get().events, agentEvents) });
+        // Quiet internal retries: a transient model-provider failure never
+        // reaches the user — the turn simply attempts again behind the
+        // same "working…" shimmer (busy stays true, no error card). Budget:
+        // AI_TURN_RETRY_DELAYS_MS.length retries. Rules of engagement:
+        //  - only the KNOWN-transient failure classes retry (turn-retry.ts)
+        //  - an attempt that streamed tool events never retries — those
+        //    shapes already ran on the canvas, and a fresh attempt would
+        //    duplicate them; such failures surface immediately
+        //  - pressing Stop during the backoff sleeps ends the turn as a
+        //    quiet stop (the panel's shimmer is already saying "cancelling…")
+        // Worst case before a visible error: the completion timeout the
+        // Rust side enforces (120s) × the attempt budget.
+        let attempt = 0;
+        for (;;) {
+          try {
+            const agentEvents = await aiChat(historyOf(withPrompt), text, context);
+            // Success path (also the only exit): stop the stream before
+            // settling — a straggler payload that arrives between the
+            // invoke resolving and this point must not append after the
+            // authoritative replace and duplicate the tail.
+            unlisten();
+            set({ events: settleTurn(get().events, agentEvents) });
+            return;
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            const streamed = get().events.length > withPrompt.length;
+            if (get().stopRequested) return; // quiet stop: no error, no retry
+            if (
+              attempt >= AI_TURN_RETRY_DELAYS_MS.length ||
+              streamed ||
+              !isTransientAiError(message)
+            ) {
+              throw error;
+            }
+            // the retry budget owns backoff sleeps: busy never flips, so the
+            // panel's "working…" shimmer holds across attempts
+            await sleep(AI_TURN_RETRY_DELAYS_MS[attempt]);
+            attempt += 1;
+            if (get().stopRequested) return; // stop pressed during backoff
+          }
+        }
       } catch (error) {
         // Tool events that streamed before the failure stay in the
         // transcript — the turn's work is never thrown away.
-        set({ error: error instanceof Error ? error.message : String(error) });
+        const message = error instanceof Error ? error.message : String(error);
+        set({ error: message });
+        // The failure surfaces as a toast, deliberately out of the
+        // canvas/panel UI: no inline error card anywhere. Renderers that
+        // need the error in state (the canvas prompt's open-on-question
+        // logic) still read `error` from the store.
+        toast.error('AI request failed', { description: message });
       } finally {
         try {
           unlisten();

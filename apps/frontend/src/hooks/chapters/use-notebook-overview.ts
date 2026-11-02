@@ -110,12 +110,9 @@ export function useNotebookOverview(notebookId: string) {
 
   const chapterIndex = selected ? (chapters?.findIndex((c) => c.id === selected.id) ?? -1) : -1;
 
-  // the search filters client-side: both lists are small, so computing during
-  // render is cheaper than another memo layer
-  const filteredChapters = chapters && search.trim()
-    ? chapters.filter((c) => c.name.toLowerCase().includes(search.trim().toLowerCase()))
-    : chapters;
-
+  // the search filters client-side: the topic list is small, so computing
+  // during render is cheaper than another memo layer. Topics only — the
+  // chapters column stays complete (the header field says "Search topics")
   const filteredTopics = topics && search.trim()
     ? topics.filter((t) => t.name.toLowerCase().includes(search.trim().toLowerCase()))
     : topics;
@@ -166,7 +163,6 @@ export function useNotebookOverview(notebookId: string) {
     error,
     setError,
     chapters,
-    filteredChapters,
     filteredTopics,
     topics,
     selected,

@@ -32,6 +32,7 @@ import {
   useEditor,
   useValue,
 } from 'tldraw';
+import { isMac } from '@/lib/platform';
 import { useExportStore } from '@/stores/export-store';
 import { useViewModeStore } from '@/stores/view-mode-store';
 
@@ -109,8 +110,8 @@ export function ConversionsMenuGroupWithPdf() {
 }
 
 /** The View mode row (Preferences submenu, right below Focus mode with the
- *  Ctrl+Alt+V shortcut): covers page chapters in the chrome-less reading
- *  mode. Self-hides outside page chapters. */
+ *  Ctrl+Alt+V shortcut — ⌥⌘V on mac): covers page chapters in the
+ *  chrome-less reading mode. Self-hides outside page chapters. */
 export function ViewModeMenuItem() {
   const enabled = useViewModeStore((s) => s.enabled);
   const on = useViewModeStore((s) => s.on);
@@ -120,7 +121,7 @@ export function ViewModeMenuItem() {
     <TldrawUiMenuCheckboxItem
       id="oort-view-mode"
       label="View mode"
-      kbd="ctrl+alt+v"
+      kbd={isMac() ? 'cmd+alt+v' : 'ctrl+alt+v'}
       checked={on}
       onSelect={toggle}
     />
