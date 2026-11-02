@@ -118,6 +118,12 @@ bunx tauri build
 - macOS → `target/release/bundle/dmg/*.dmg`, `macos/*.app`
 - Optional: set `OORT_GOOGLE_CLIENT_ID` before building to bake in the Google Drive OAuth client.
 
+Release builds sign updater artifacts. Without the updater signing key, disable them for a local build:
+
+```bash
+bunx tauri build --config '{"bundle":{"createUpdaterArtifacts":false}}'
+```
+
 **Tests**
 
 ```bash
