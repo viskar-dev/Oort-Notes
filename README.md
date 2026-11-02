@@ -10,11 +10,23 @@ A canvas notebook that thinks like an IDE and teaches like a tutor.
 &nbsp;
 <a href="releases/pre-release/Oort-Notes-0.1.0-x64.msi"><img src="docs/assets/download-windows-msi.svg" height="44" alt="Download Oort Notes for Windows — MSI package" /></a>
 
-**Pre-release v0.1.0** · Windows 10/11 · 64-bit
 <br />
-<sub>macOS and Linux builds arrive with the stable release.</sub>
+
+<a href="https://github.com/viskar-dev/Oort-Notes/releases"><img src="docs/assets/download-macos.svg" height="44" alt="Download Oort Notes for macOS" /></a>
+&nbsp;
+<a href="https://github.com/viskar-dev/Oort-Notes/releases"><img src="docs/assets/download-linux.svg" height="44" alt="Download Oort Notes for Linux" /></a>
+
+**Pre-release v0.1.0** · Windows 10/11 · macOS · Linux
+<br />
+<sub>Windows is a direct download. macOS (.dmg) and Linux (AppImage, .deb, .rpm) packages are attached to the <a href="https://github.com/viskar-dev/Oort-Notes/releases">GitHub release</a>.</sub>
 
 </div>
+
+## Platform notes
+
+- **Windows 10/11 (x64):** run the `.exe` installer; the `.msi` is for managed or silent installs.
+- **macOS (Apple Silicon / Intel):** pick the matching `.dmg` from the release. Builds are unsigned for now — on first launch, right-click the app and choose **Open**.
+- **Linux (x64):** use the AppImage (run `chmod +x` first), or install the `.deb` / `.rpm` package.
 
 ## Why Oort Notes
 
@@ -121,5 +133,5 @@ cargo test -p note-core
 
 ## Status
 
-- **v0.1.0 (pre-release)** — Windows x64 installers above. Feedback is welcome via [issues](https://github.com/viskar-dev/Oort-Notes/issues).
-- Stable macOS and Linux builds, more components and additional release channels are next.
+- **v0.1.0 (pre-release)** — Windows, macOS and Linux packages. Feedback is welcome via [issues](https://github.com/viskar-dev/Oort-Notes/issues).
+- More components and additional release channels are next.
