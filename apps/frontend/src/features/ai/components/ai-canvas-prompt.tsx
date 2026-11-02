@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Editor } from 'tldraw';
-import { toast } from 'sonner';
 import { useAiStore, type ConversationEvent } from '../ai-store';
 import { useAiCanvasPromptStore } from '../canvas-prompt-store';
 import { MUTATING_TOOLS } from '../executors';
@@ -157,7 +156,7 @@ function AiCanvasPromptCard({
       .send(text, context)
       .then(() => {
         const state = useAiStore.getState();
-        if (state.error) return; // failure is toasted below
+        if (state.error) return; // already toasted by the store
         const slice = state.events.slice(startIndex);
         if (!didEditCanvas(slice)) {
           // Nothing was created or changed: the reply wants the user's input
@@ -169,10 +168,7 @@ function AiCanvasPromptCard({
       })
       .catch(() => undefined) // send never rejects; belt and braces
       .finally(() => {
-        const error = useAiStore.getState().error;
-        if (error) {
-          toast.error('AI request failed', { description: error });
-        }
+        // failures already toasted by the store — no duplicate here
         setPending(null);
         // Done means done: the canvas shows what was created, the panel
         // holds the transcript. The card never displays response text.

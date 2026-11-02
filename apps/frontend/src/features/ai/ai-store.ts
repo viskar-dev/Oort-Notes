@@ -1,3 +1,4 @@
+import { toast } from 'sonner';
 import { create } from 'zustand';
 import { aiCancelTurn, aiChat, listenAiTurnEvents, type AiAgentEvent, type AiHistoryMessage } from './ai-ipc';
 import { useAiGhostStore } from './ghost-store';
@@ -21,7 +22,9 @@ interface AiState {
   events: ConversationEvent[];
   /** A turn is being awaited (send button spins, input disabled). */
   busy: boolean;
-  /** Transport/turn failure shown at the bottom of the transcript. */
+  /** Last turn failure. Never rendered as a card — the store toasts it;
+   *  kept in state for logic that must know a turn failed (the canvas
+   *  prompt's open-on-question decision). */
   error: string | null;
 
   /** Press Stop while a turn runs — including while it is quietly retrying
@@ -150,7 +153,13 @@ export const useAiStore = create<AiState>((set, get) => ({
       } catch (error) {
         // Tool events that streamed before the failure stay in the
         // transcript — the turn's work is never thrown away.
-        set({ error: error instanceof Error ? error.message : String(error) });
+        const message = error instanceof Error ? error.message : String(error);
+        set({ error: message });
+        // The failure surfaces as a toast, deliberately out of the
+        // canvas/panel UI: no inline error card anywhere. Renderers that
+        // need the error in state (the canvas prompt's open-on-question
+        // logic) still read `error` from the store.
+        toast.error('AI request failed', { description: message });
       } finally {
         try {
           unlisten();

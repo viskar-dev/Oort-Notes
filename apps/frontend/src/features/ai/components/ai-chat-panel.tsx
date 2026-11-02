@@ -119,11 +119,6 @@ export function AiChatPanel() {
             <Shimmer className="text-xs">{cancelling ? 'cancelling…' : 'working…'}</Shimmer>
           </div>
         )}
-        {error && (
-          <div className="my-2 rounded-lg bg-red-950/80 px-3 py-2 text-xs text-red-300">
-            {error}
-          </div>
-        )}
       </div>
 
       {/* composer pill: the mark on the front, then the (smarter) input —
