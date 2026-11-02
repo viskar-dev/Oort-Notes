@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="52" viewBox="0 0 256 52" role="img" aria-label="Download for Windows, MSI package">
+  <rect x="1" y="1" width="254" height="50" rx="9" fill="#1c1c24" stroke="#7c4dff" stroke-opacity="0.55" stroke-width="1.5"/>
+  <g transform="translate(18 16) scale(0.8333)" fill="#c9b6ff">
+    <path d="M0 3.449L9.75 2.1v9.451H0m10.949-9.602L24 0v11.4H10.949M0 12.6h9.75v9.451L0 20.699M10.949 12.6H24V24l-12.9-1.801z"/>
+  </g>
+  <text x="48" y="25" fill="#ffffff" font-family="Segoe UI, -apple-system, Helvetica, Arial, sans-serif" font-size="14" font-weight="600">MSI package</text>
+  <text x="48" y="41" fill="#b9b4c9" font-family="Segoe UI, -apple-system, Helvetica, Arial, sans-serif" font-size="10.5">For managed or silent installs</text>
+</svg>
