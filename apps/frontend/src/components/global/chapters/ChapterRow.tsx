@@ -75,16 +75,17 @@ export function ChapterRow({
 
       {/* canvas type + count ⋄ menu: one reserved slot; the tiny type icon
           sits left of the count and hover swaps both for the menu */}
-      <span className="relative grid h-7 shrink-0 place-items-center gap-1.5 grid-flow-col pr-1.5">
-        <CanvasTypeIcon type={chapter.canvas_type} className="group-hover:opacity-0 transition-opacity duration-100" />
-        {/* Visible by default for both active and inactive rows. The hover
-            rule must win without an opacity-100 conflict, otherwise the
-            selected row shows the type icon, count and menu together. */}
-        <span className="text-xs text-fg-3 tabular-nums transition-opacity duration-100 group-hover:opacity-0">
-          {chapter.topics_count}
+      {/* One right-side state at a time: the type icon + count, or the ⋯
+          menu on hover/focus, in the same fixed-width slot. Hide the
+          default cluster for both hover and focus-within so selecting a
+          row cannot show all three at once. */}
+      <span className="relative h-7 w-12 shrink-0">
+        <span className="absolute inset-0 flex items-center justify-end gap-1.5 pr-1 group-hover:hidden group-focus-within:hidden">
+          <CanvasTypeIcon type={chapter.canvas_type} />
+          <span className="text-xs text-fg-3 tabular-nums">{chapter.topics_count}</span>
         </span>
         <span
-          className="absolute inset-0 grid place-items-center opacity-0 transition-opacity duration-100 group-hover:opacity-100 group-focus-within:opacity-100"
+          className="absolute inset-0 flex items-center justify-end pr-1 opacity-0 transition-opacity duration-100 group-hover:opacity-100 group-focus-within:opacity-100"
           onClick={(e) => e.stopPropagation()}
         >
           <DropdownMenu>
