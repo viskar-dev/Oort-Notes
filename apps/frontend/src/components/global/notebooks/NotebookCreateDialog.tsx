@@ -1,4 +1,6 @@
 import { useRef, useState } from 'react';
+import { invoke, isTauri } from '@tauri-apps/api/core';
+import { open as tauriOpen } from '@tauri-apps/plugin-dialog';
 import { Upload } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -33,16 +35,39 @@ function NotebookImportPanel({
   const [importing, setImporting] = useState(false);
   const valid = archive !== '' && name.trim() !== '' && !importing;
 
+  const applyArchive = (text: string, label: string) => {
+    const suggested = suggestedName(text);
+    if (!suggested) throw new Error('This file does not contain an Oort notebook.');
+    setArchive(text);
+    setFileName(label);
+    setName(suggested);
+  };
+
   const chooseFile = async (file: File | undefined) => {
     if (!file) return;
     setError(null);
     try {
-      const text = await file.text();
-      const suggested = suggestedName(text);
-      if (!suggested) throw new Error('This file does not contain an Oort notebook.');
-      setArchive(text);
-      setFileName(file.name);
-      setName(suggested);
+      applyArchive(await file.text(), file.name);
+    } catch (e) {
+      setArchive('');
+      setFileName('');
+      setName('');
+      setError(errorText(e));
+    }
+  };
+
+  const chooseNativeFile = async () => {
+    setError(null);
+    try {
+      const path = await tauriOpen({
+        multiple: false,
+        filters: [{ name: 'Oort notebook', extensions: ['oort'] }],
+      });
+      if (!path) return;
+      const selected = Array.isArray(path) ? path[0] : path;
+      if (!selected) return;
+      const text = await invoke<string>('read_oort_import', { path: selected });
+      applyArchive(text, selected.split(/[\\/]/).pop() ?? selected);
     } catch (e) {
       setArchive('');
       setFileName('');
@@ -77,7 +102,7 @@ function NotebookImportPanel({
         <Button
           type="button"
           variant="outline"
-          onClick={() => fileRef.current?.click()}
+          onClick={() => (isTauri() ? void chooseNativeFile() : fileRef.current?.click())}
           className="h-20 border-dashed"
         >
           <span className="flex flex-col items-center gap-1.5">

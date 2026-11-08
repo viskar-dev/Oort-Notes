@@ -108,6 +108,20 @@ async fn import_notebook(
         .map_err(map)
 }
 
+#[tauri::command]
+async fn write_oort_export(path: String, contents: String) -> R<()> {
+    std::fs::write(&path, contents).map_err(|e| format!("Could not write {path}: {e}"))
+}
+
+#[tauri::command]
+async fn read_oort_import(path: String) -> R<String> {
+    let metadata = std::fs::metadata(&path).map_err(|e| format!("Could not read {path}: {e}"))?;
+    if metadata.len() > 64 * 1024 * 1024 {
+        return Err("This .oort file is larger than 64 MB.".to_string());
+    }
+    std::fs::read_to_string(&path).map_err(|e| format!("Could not read {path}: {e}"))
+}
+
 // =========================
 // Chapters
 // =========================
@@ -796,6 +810,7 @@ pub fn run() {
         .plugin(tauri_plugin_decoration::init())
         .plugin(tauri_plugin_sql::Builder::default().build())
         .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             // auto-update is a desktop-only concern
             #[cfg(desktop)]
@@ -845,6 +860,8 @@ pub fn run() {
             delete_notebook,
             export_notebook,
             import_notebook,
+            write_oort_export,
+            read_oort_import,
             create_chapter,
             list_chapters,
             load_chapter,

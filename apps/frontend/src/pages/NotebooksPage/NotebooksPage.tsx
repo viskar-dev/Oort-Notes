@@ -1,5 +1,7 @@
 import { useCallback, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { invoke, isTauri } from '@tauri-apps/api/core';
+import { save as tauriSave } from '@tauri-apps/plugin-dialog';
 import { api, type Notebook } from '@/lib/ipc';
 import { errorText } from '@/lib/utils';
 import { HOME_CONTAINER, WorkspaceLayout } from '@/components/layout/workspace-layout';
@@ -54,16 +56,29 @@ export function NotebooksPage() {
   const handleExport = useCallback(async (nb: Notebook) => {
     try {
       const archive = await api.exportNotebook(nb.id);
+      const fileName = `${nb.name.trim().replace(/[\\/:*?"<>|]/g, '-').replace(/\s+/g, ' ') || 'notebook'}.oort`;
+
+      if (isTauri()) {
+        const path = await tauriSave({
+          defaultPath: fileName,
+          filters: [{ name: 'Oort notebook', extensions: ['oort'] }],
+        });
+        if (!path) return;
+        await invoke('write_oort_export', { path, contents: archive });
+        toast.success('Notebook exported', { description: path });
+        return;
+      }
+
       const blob = new Blob([archive], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-      link.download = `${nb.name.trim().replace(/[\\/:*?"<>|]/g, '-').replace(/\s+/g, ' ') || 'notebook'}.oort`;
+      link.download = fileName;
       document.body.appendChild(link);
       link.click();
       link.remove();
       URL.revokeObjectURL(url);
-      toast.success('Notebook exported', { description: link.download });
+      toast.success('Notebook exported', { description: fileName });
     } catch (e) {
       toast.error('Could not export notebook', { description: errorText(e) });
     }
