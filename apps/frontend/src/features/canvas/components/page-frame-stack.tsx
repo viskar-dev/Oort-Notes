@@ -18,7 +18,7 @@ export function PageFrameStack({
 }) {
   const editor = useEditor();
   useValue('camera', () => editor.getCamera(), [editor]);
-  useValue('screenBounds', () => editor.getViewportScreenBounds(), [editor]);
+  const viewport = useValue('screenBounds', () => editor.getViewportScreenBounds(), [editor]);
 
   // pageToScreen returns window coordinates; the frames are positioned
   // relative to the editor container, so subtract its offset
@@ -32,26 +32,29 @@ export function PageFrameStack({
   // dim everything outside the stack — a giant 3000px box-shadow repaints on
   // every camera frame (paint storm + visible flicker over the diagrams on
   // real GPUs); solid rects composite for free.
-  const toRectStyle = (x: number, y: number) => {
-    const p = toRect(x, y);
-    return { left: p.x, top: p.y };
-  };
   const dimColor = 'rgba(5,5,6,0.93)';
 
   const stackH = count > 0 ? count * (height + gap) - gap : height;
   const stackTop = toRect(0, 0);
   const stackBottom = toRect(width, stackH);
 
+  // The bands are screen-space overlays. Clamp them to the viewport and to
+  // the visible sheet edges: a fixed world-space origin (the old -100000
+  // trick) drifts above the viewport as the camera zooms out, so the "above"
+  // band grew over the entire sheet and the canvas went black below fit zoom.
+  const vw = viewport.w;
+  const vh = viewport.h;
+  const top = Math.max(0, Math.min(stackTop.y, vh));
+  const bottom = Math.max(0, Math.min(stackBottom.y, vh));
+  const left = Math.max(0, Math.min(stackTop.x, vw));
+  const right = Math.max(0, Math.min(stackBottom.x, vw));
+
   // the four dim bands around the stack (top / bottom / left / right)
   const dims = [
-    // above the stack
-    { ...toRectStyle(-100000, -100000), width: width + 200000, height: 100000 + stackTop.y },
-    // below the stack
-    { ...toRectStyle(-100000, stackH), width: width + 200000, height: 200000 },
-    // left of the stack
-    { left: 0, top: stackTop.y, width: Math.max(stackTop.x, 0), height: stackBottom.y - stackTop.y },
-    // right of the stack
-    { left: stackBottom.x, top: stackTop.y, width: 100000, height: stackBottom.y - stackTop.y },
+    { left: 0, top: 0, width: vw, height: top },
+    { left: 0, top: bottom, width: vw, height: Math.max(0, vh - bottom) },
+    { left: 0, top, width: left, height: Math.max(0, bottom - top) },
+    { left: right, top, width: Math.max(0, vw - right), height: Math.max(0, bottom - top) },
   ];
 
   return (

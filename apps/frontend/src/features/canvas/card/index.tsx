@@ -51,6 +51,8 @@ type CalloutProps = {
   tinted: boolean;
   /** hides the body, keeps the header */
   collapsed: boolean;
+  /** locked in place until the pin is turned off */
+  pinned?: boolean;
 };
 
 export type CalloutCardShape = TLBaseShape<'callout-card', CalloutProps>;
@@ -161,6 +163,10 @@ const CSS = `
 .tl-cc-card code{font-family:var(--tl-font-mono,ui-monospace,monospace);font-size:.92em;color:var(--cb-strong);background:none;padding:0}
 .tl-cc-field{position:relative;min-height:1.4em;user-select:none;border-radius:4px}
 .tl-cc-field p{margin:0}
+/* Static rich-text output sits outside tldraw's .tl-rich-text wrapper, so
+   the global list reset strips bullets/numbers. Restore them for the card. */
+.tl-cc-field ul,.tl-cc-field ol{margin:0;padding-left:3.25ch;list-style:revert;text-align:left}
+.tl-cc-field li p{display:inline}
 .tl-cc-field .ProseMirror{outline:none;user-select:text;white-space:pre-wrap;margin:0}
 .tl-cc-placeholder{opacity:.4}
 `;
@@ -410,6 +416,7 @@ export class CalloutCardUtil extends BaseBoxShapeUtil<CalloutCardShape> {
     showBadge: T.boolean,
     tinted: T.boolean,
     collapsed: T.boolean,
+    pinned: T.boolean.optional(),
   };
 
   override canEdit(): boolean {
@@ -418,6 +425,18 @@ export class CalloutCardUtil extends BaseBoxShapeUtil<CalloutCardShape> {
 
   override hideRotateHandle(): boolean {
     return true;
+  }
+
+  override canResize(shape: CalloutCardShape): boolean {
+    return !shape.props.pinned;
+  }
+
+  /** Pinned cards stay at their world position through drags, nudges and
+   *  layout actions. Content edits (height fits) still pass through. */
+  override onBeforeUpdate(prev: CalloutCardShape, next: CalloutCardShape) {
+    if (prev.props.pinned && (prev.x !== next.x || prev.y !== next.y)) {
+      return { ...next, x: prev.x, y: prev.y };
+    }
   }
 
   override onEditEnd = () => {
@@ -437,6 +456,7 @@ export class CalloutCardUtil extends BaseBoxShapeUtil<CalloutCardShape> {
       showBadge: true,
       tinted: false,
       collapsed: false,
+      pinned: false,
     };
   }
 
