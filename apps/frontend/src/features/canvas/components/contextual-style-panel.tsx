@@ -22,6 +22,7 @@ import {
   Minimize2,
   PencilLine,
   PanelTop,
+  Pin,
   Sigma,
   StretchHorizontal,
   StretchVertical,
@@ -792,7 +793,7 @@ function TableControlsGroup({ shape }: { shape: TableShape }) {
 /** Variant / icon / toggle controls — shown when one callout card is selected. */
 function CardControlsGroup({ shape }: { shape: CalloutCardShape }) {
   const editor = useEditor();
-  const { variant, icon, showIcon, showBadge, tinted, collapsed } = shape.props;
+  const { variant, icon, showIcon, showBadge, tinted, collapsed, pinned } = shape.props;
   const isDark = useValue('callout card dark', () => editor.user.getIsDarkMode(), [editor]);
   const [variantOpen, setVariantOpen] = useState(false);
   const [iconOpen, setIconOpen] = useState(false);
@@ -897,6 +898,16 @@ function CardControlsGroup({ shape }: { shape: CalloutCardShape }) {
         onClick={() => set('card toggle badge', { showBadge: !showBadge })}
       >
         <Tag className="h-4 w-4" />
+      </TldrawUiToolbarButton>
+      <TldrawUiToolbarButton
+        type="icon"
+        title={pinned ? 'Unpin card' : 'Pin card in place'}
+        data-testid="style-picker.card.toggle.pin"
+        isActive={!!pinned}
+        onMouseDown={keepCellFocus}
+        onClick={() => set(pinned ? 'card unpin' : 'card pin', { pinned: !pinned })}
+      >
+        <Pin className="h-4 w-4" />
       </TldrawUiToolbarButton>
       <TldrawUiToolbarButton
         type="icon"

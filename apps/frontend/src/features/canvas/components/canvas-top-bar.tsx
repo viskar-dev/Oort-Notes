@@ -115,6 +115,8 @@ export function CanvasTopBar({
             <ChevronLeft className="h-4 w-4" />
           </button>
           <div className="flex items-center gap-1.5">
+            {/* tldraw's native main menu (⋮) lands here on infinite canvases too */}
+            <div ref={mainMenuSlotRef} className="flex shrink-0 items-center" />
             {onOpenAi && (
               <button
                 title={`AI assistant (${AI_ASSISTANT_HINT})`}
