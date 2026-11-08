@@ -77,11 +77,10 @@ export function ChapterRow({
           sits left of the count and hover swaps both for the menu */}
       <span className="relative grid h-7 shrink-0 place-items-center gap-1.5 grid-flow-col pr-1.5">
         <CanvasTypeIcon type={chapter.canvas_type} className="group-hover:opacity-0 transition-opacity duration-100" />
-        <span
-          className={`text-xs text-fg-3 tabular-nums transition-opacity duration-100 ${
-            active ? 'opacity-100 group-hover:opacity-0' : 'group-hover:opacity-0'
-          }`}
-        >
+        {/* Visible by default for both active and inactive rows. The hover
+            rule must win without an opacity-100 conflict, otherwise the
+            selected row shows the type icon, count and menu together. */}
+        <span className="text-xs text-fg-3 tabular-nums transition-opacity duration-100 group-hover:opacity-0">
           {chapter.topics_count}
         </span>
         <span
