@@ -77,6 +77,12 @@ export function useNotebookList() {
     reload();
   };
 
+  const importNotebook = async (archive: string, name?: string) => {
+    setError(null);
+    await api.importNotebook(archive, name);
+    reload();
+  };
+
   return {
     notebooks,
     error,
@@ -91,5 +97,6 @@ export function useNotebookList() {
     createNotebook,
     updateNotebook,
     deleteNotebook,
+    importNotebook,
   };
 }

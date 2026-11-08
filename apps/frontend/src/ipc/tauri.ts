@@ -41,6 +41,8 @@ export const tauriTransport: Transport = {
   createNotebook: (name, label, description, icon) =>
     invoke<Notebook>('create_notebook', { name, label, description, icon }),
   deleteNotebook: (id) => invoke<void>('delete_notebook', { id }),
+  exportNotebook: (id) => invoke<string>('export_notebook', { id }),
+  importNotebook: (archive, name) => invoke<Notebook>('import_notebook', { archive, name }),
 
   listPagePresets: () => invoke<PagePreset[]>('list_page_presets'),
   listUiPresets: () => invoke<UiPreset[]>('list_ui_presets'),

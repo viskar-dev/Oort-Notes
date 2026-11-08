@@ -90,6 +90,24 @@ async fn delete_notebook(id: String, pool: State<'_, SqlitePool>) -> R<()> {
     repo::soft_delete_notebook(&pool, &id).await.map_err(map)
 }
 
+#[tauri::command]
+async fn export_notebook(id: String, pool: State<'_, SqlitePool>) -> R<String> {
+    note_core::share::build_notebook_share(&pool, &id)
+        .await
+        .map_err(map)
+}
+
+#[tauri::command]
+async fn import_notebook(
+    archive: String,
+    name: Option<String>,
+    pool: State<'_, SqlitePool>,
+) -> R<Notebook> {
+    note_core::share::import_notebook(&pool, &archive, name.as_deref())
+        .await
+        .map_err(map)
+}
+
 // =========================
 // Chapters
 // =========================
@@ -825,6 +843,8 @@ pub fn run() {
             update_notebook_flags,
             load_notebook,
             delete_notebook,
+            export_notebook,
+            import_notebook,
             create_chapter,
             list_chapters,
             load_chapter,

@@ -14,6 +14,7 @@ export function NotebookRow({
   onRename,
   onToggleFavorite,
   onToggleArchive,
+  onExport,
   onDelete,
 }: {
   notebook: Notebook;
@@ -22,6 +23,7 @@ export function NotebookRow({
   onRename: () => void;
   onToggleFavorite: () => void;
   onToggleArchive: () => void;
+  onExport: () => void;
   onDelete: () => void;
 }) {
   const archived = nb.archived_at !== null;
@@ -97,7 +99,7 @@ export function NotebookRow({
               </button>
             }
           />
-          <NotebookMenu nb={nb} archived={archived} onOpen={onOpen} onRename={onRename} onToggleFavorite={onToggleFavorite} onToggleArchive={onToggleArchive} onDelete={onDelete} />
+          <NotebookMenu nb={nb} archived={archived} onOpen={onOpen} onRename={onRename} onToggleFavorite={onToggleFavorite} onToggleArchive={onToggleArchive} onExport={onExport} onDelete={onDelete} />
         </DropdownMenu>
       </div>
       {/* hairline divider fades at both ends; sibling, not a border */}
@@ -114,6 +116,7 @@ export function NotebookMenu({
   onRename,
   onToggleFavorite,
   onToggleArchive,
+  onExport,
   onDelete,
 }: {
   nb: Notebook;
@@ -122,6 +125,7 @@ export function NotebookMenu({
   onRename: () => void;
   onToggleFavorite: () => void;
   onToggleArchive: () => void;
+  onExport: () => void;
   onDelete: () => void;
 }) {
   return (
@@ -133,6 +137,9 @@ export function NotebookMenu({
       </DropdownMenuItem>
       <DropdownMenuItem onClick={onToggleArchive} className="h-8 rounded-md hover:bg-white/[0.04]">
         {archived ? 'Unarchive' : 'Archive'}
+      </DropdownMenuItem>
+      <DropdownMenuItem onClick={onExport} className="h-8 rounded-md hover:bg-white/[0.04]">
+        Export .oort
       </DropdownMenuItem>
       <DropdownMenuSeparator className="bg-white/[0.06]" />
       <DropdownMenuItem variant="destructive" onClick={onDelete} className="h-8 rounded-md">

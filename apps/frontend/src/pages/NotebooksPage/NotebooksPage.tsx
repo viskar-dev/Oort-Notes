@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import type { Notebook } from '@/lib/ipc';
+import { api, type Notebook } from '@/lib/ipc';
 import { errorText } from '@/lib/utils';
 import { HOME_CONTAINER, WorkspaceLayout } from '@/components/layout/workspace-layout';
 import { NotebooksHeader } from '@/components/global/notebooks/NotebooksHeader';
@@ -23,6 +23,7 @@ export function NotebooksPage() {
   const list = useNotebookList();
   const dialogs = useNotebookDialogs({
     createNotebook: list.createNotebook,
+    importNotebook: list.importNotebook,
     updateNotebook: list.updateNotebook,
     deleteNotebook: list.deleteNotebook,
     onError: (message) => toast.error('Notebook action failed', { description: message }),
@@ -49,6 +50,24 @@ export function NotebooksPage() {
       toast.error('Could not update notebook', { description: errorText(e) });
     }
   }, [list]);
+
+  const handleExport = useCallback(async (nb: Notebook) => {
+    try {
+      const archive = await api.exportNotebook(nb.id);
+      const blob = new Blob([archive], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${nb.name.trim().replace(/[\\/:*?"<>|]/g, '-').replace(/\s+/g, ' ') || 'notebook'}.oort`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      toast.success('Notebook exported', { description: link.download });
+    } catch (e) {
+      toast.error('Could not export notebook', { description: errorText(e) });
+    }
+  }, []);
 
   const clearFilters = useCallback(() => {
     list.setSearch('');
@@ -138,6 +157,7 @@ export function NotebooksPage() {
                 onRename={() => dialogs.openRename(nb)}
                 onToggleFavorite={() => handleUpdate(nb, { isFavorite: !nb.is_favorite })}
                 onToggleArchive={() => handleUpdate(nb, { archived: nb.archived_at === null })}
+                onExport={() => void handleExport(nb)}
                 onDelete={() => dialogs.openDelete(nb)}
               />
             ))}
@@ -156,6 +176,7 @@ export function NotebooksPage() {
                 onRename={() => dialogs.openRename(nb)}
                 onToggleFavorite={() => handleUpdate(nb, { isFavorite: !nb.is_favorite })}
                 onToggleArchive={() => handleUpdate(nb, { archived: nb.archived_at === null })}
+                onExport={() => void handleExport(nb)}
                 onDelete={() => dialogs.openDelete(nb)}
               />
             ))}
@@ -164,7 +185,11 @@ export function NotebooksPage() {
       </div>
 
       {dialogs.creating && (
-        <NotebookCreateDialog onCreate={dialogs.submitCreate} onClose={dialogs.closeCreate} />
+        <NotebookCreateDialog
+          onCreate={dialogs.submitCreate}
+          onImport={dialogs.submitImport}
+          onClose={dialogs.closeCreate}
+        />
       )}
       {dialogs.renaming && (
         <NotebookRenameDialog

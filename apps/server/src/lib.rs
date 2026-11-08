@@ -119,6 +119,32 @@ async fn delete_notebook(
         .map_err(to_status)
 }
 
+#[derive(Deserialize)]
+struct ImportNotebookBody {
+    archive: String,
+    name: Option<String>,
+}
+
+async fn export_notebook(
+    State(pool): State<SqlitePool>,
+    Path(id): Path<String>,
+) -> ApiResult<String> {
+    note_core::share::build_notebook_share(&pool, &id)
+        .await
+        .map(Json)
+        .map_err(to_status)
+}
+
+async fn import_notebook(
+    State(pool): State<SqlitePool>,
+    Json(b): Json<ImportNotebookBody>,
+) -> ApiResult<Notebook> {
+    note_core::share::import_notebook(&pool, &b.archive, b.name.as_deref())
+        .await
+        .map(Json)
+        .map_err(to_status)
+}
+
 // ---------- Chapters ----------
 
 #[derive(Deserialize)]
@@ -460,6 +486,8 @@ pub fn build_router(pool: SqlitePool) -> Router {
             get(|| async { Json(serde_json::json!({"message": "pong"})) }),
         )
         .route("/api/notebooks", get(list_notebooks).post(create_notebook))
+        .route("/api/notebooks/import", post(import_notebook))
+        .route("/api/notebooks/{id}/export", get(export_notebook))
         .route("/api/notebooks/{id}/flags", patch(update_notebook_flags))
         .route(
             "/api/notebooks/{id}",

@@ -97,6 +97,8 @@ export const httpTransport: Transport = {
   createNotebook: (name, label, description, icon) =>
     post<Notebook>('/api/notebooks', { name, label, description, icon }),
   deleteNotebook: (id) => del(`/api/notebooks/${id}`),
+  exportNotebook: (id) => get<string>(`/api/notebooks/${id}/export`),
+  importNotebook: (archive, name) => post<Notebook>('/api/notebooks/import', { archive, name }),
 
   listPagePresets: () => get<PagePreset[]>('/api/page-presets'),
   listUiPresets: () => get<UiPreset[]>('/api/ui-presets'),
