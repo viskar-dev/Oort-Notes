@@ -26,7 +26,6 @@ import {
   Sigma,
   StretchHorizontal,
   StretchVertical,
-  Tag,
   WandSparkles,
   type LucideIcon,
 } from 'lucide-react';
@@ -793,7 +792,7 @@ function TableControlsGroup({ shape }: { shape: TableShape }) {
 /** Variant / icon / toggle controls — shown when one callout card is selected. */
 function CardControlsGroup({ shape }: { shape: CalloutCardShape }) {
   const editor = useEditor();
-  const { variant, icon, showIcon, showBadge, tinted, collapsed, pinned } = shape.props;
+  const { variant, icon, showIcon, tinted, collapsed, pinned } = shape.props;
   const isDark = useValue('callout card dark', () => editor.user.getIsDarkMode(), [editor]);
   const [variantOpen, setVariantOpen] = useState(false);
   const [iconOpen, setIconOpen] = useState(false);
@@ -888,16 +887,6 @@ function CardControlsGroup({ shape }: { shape: CalloutCardShape }) {
         onClick={() => set('card toggle icon', { showIcon: !showIcon })}
       >
         {showIcon ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
-      </TldrawUiToolbarButton>
-      <TldrawUiToolbarButton
-        type="icon"
-        title="Badge"
-        data-testid="style-picker.card.toggle.badge"
-        isActive={showBadge}
-        onMouseDown={keepCellFocus}
-        onClick={() => set('card toggle badge', { showBadge: !showBadge })}
-      >
-        <Tag className="h-4 w-4" />
       </TldrawUiToolbarButton>
       <TldrawUiToolbarButton
         type="icon"

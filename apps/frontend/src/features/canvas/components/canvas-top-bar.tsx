@@ -106,17 +106,19 @@ export function CanvasTopBar({
             revealed ? 'pointer-events-auto opacity-100 duration-150' : 'pointer-events-none opacity-0 duration-100'
           }`}
         >
-          <button
-            title="Back to chapters"
-            data-testid="topbar.back"
-            onClick={onBack}
-            className="rounded-md p-2 text-muted-foreground transition-colors hover:bg-raised hover:text-foreground"
-          >
-            <ChevronLeft className="h-4 w-4" />
-          </button>
-          <div className="flex items-center gap-1.5">
+          <div className="flex shrink-0 items-center gap-1.5">
+            <button
+              title="Back to chapters"
+              data-testid="topbar.back"
+              onClick={onBack}
+              className="rounded-md p-2 text-muted-foreground transition-colors hover:bg-raised hover:text-foreground"
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </button>
             {/* tldraw's native main menu (⋮) lands here on infinite canvases too */}
             <div ref={mainMenuSlotRef} className="flex shrink-0 items-center" />
+          </div>
+          <div className="flex items-center gap-1.5">
             {onOpenAi && (
               <button
                 title={`AI assistant (${AI_ASSISTANT_HINT})`}
