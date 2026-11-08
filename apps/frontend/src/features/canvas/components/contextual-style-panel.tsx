@@ -66,6 +66,7 @@ import {
   type TLUiIconType,
 } from 'tldraw';
 import { useRichTextTick } from '@/hooks/canvas/use-rich-text-tick';
+import { OORT_DEFAULT_FONT_LABEL } from '@/constants/presets/catalog';
 import { useUiPresetStore } from '@/stores/ui-preset-store';
 import { useViewMode } from '@/features/canvas/view-mode';
 import { tableOps, selRC, type TableAlign, type TableShape } from '@/features/canvas/table-shape';
@@ -346,6 +347,8 @@ interface StylePickerProps<T extends string> {
   items: StyleValuesForUi<T>;
   /** Defaults to `style-panel.<uiType>`. Pass this when the two don't line up. */
   labelKey?: string;
+  /** Per-item title overrides (e.g. the preset's font is Oort's default). */
+  itemLabels?: Partial<Record<T, string>>;
   getItemColor?(value: T): string;
 }
 
@@ -355,6 +358,7 @@ function StylePicker<T extends string>({
   value,
   items,
   labelKey,
+  itemLabels,
   getItemColor,
 }: StylePickerProps<T>) {
   const editor = useEditor();
@@ -417,7 +421,7 @@ function StylePicker<T extends string>({
             <TldrawUiToolbarButton
               key={item.value}
               type="icon"
-              title={msg(`${uiType}-style.${item.value}`)}
+              title={itemLabels?.[item.value] ?? msg(`${uiType}-style.${item.value}`)}
               data-testid={`style-picker.${uiType}.${item.value}`}
               isActive={value.type === 'shared' && value.value === item.value}
               style={{ color: getItemColor?.(item.value) }}
@@ -1112,6 +1116,10 @@ export const ContextualStylePanel = track(() => {
   const viewMode = useViewMode();
   // hooks must run on every render: the component early-returns below
   const presetColors = useUiPresetStore((st) => st.config?.colors);
+  const presetFont = useUiPresetStore((st) => st.config?.fonts.default ?? 'sans');
+  const fontItemLabels: Partial<Record<string, string>> = {
+    [presetFont]: OORT_DEFAULT_FONT_LABEL,
+  };
   const hiddenColors = presetColors?.hidden;
   const colorItems = hiddenColors?.length
     ? COLOR_ITEMS.filter((i) => !hiddenColors.includes(i.value))
@@ -1236,7 +1244,15 @@ export const ContextualStylePanel = track(() => {
       {/* text shapes carry tldraw's generic S/M/L size style; the H1–H3/P
           presets replace it, so hide the small/medium/large picker for text */}
       {size && !allText && <StylePicker uiType="size" style={DefaultSizeStyle} value={size} items={SIZE_ITEMS} />}
-      {font && <StylePicker uiType="font" style={DefaultFontStyle} value={font} items={FONT_ITEMS} />}
+      {font && (
+        <StylePicker
+          uiType="font"
+          style={DefaultFontStyle}
+          value={font}
+          items={FONT_ITEMS}
+          itemLabels={fontItemLabels}
+        />
+      )}
       {geo && <StylePicker uiType="geo" style={GeoShapeGeoStyle} value={geo} items={GEO_ITEMS} />}
       {arrowKind && (
         <StylePicker uiType="arrow-kind" style={ArrowShapeKindStyle} value={arrowKind} items={ARROW_KIND_ITEMS} />

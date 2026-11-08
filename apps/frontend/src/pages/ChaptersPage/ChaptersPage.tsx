@@ -13,6 +13,7 @@ import { ChaptersPanel } from '@/components/global/chapters/ChaptersPanel';
 import { TopicsPanel } from '@/components/global/chapters/TopicsPanel';
 import { ChapterCreateDialog } from '@/components/global/chapters/ChapterCreateDialog';
 import { ChapterRenameDialog } from '@/components/global/chapters/ChapterRenameDialog';
+import { TopicRenameDialog } from '@/components/global/canvas/TopicRenameDialog';
 import { TopicCreateForm } from '@/components/forms/TopicCreateForm';
 import { useNotebookOverview } from '@/hooks/chapters/use-notebook-overview';
 import { toast } from 'sonner';
@@ -31,6 +32,8 @@ export function ChaptersPage() {
     renameChapter: data.renameChapter,
     deleteChapter: data.deleteChapter,
     deleteNotebook: data.deleteNotebook,
+    renameTopic: data.renameTopic,
+    deleteTopic: data.deleteTopic,
     onError: (message) => toast.error('Action failed', { description: message }),
   });
 
@@ -147,6 +150,8 @@ export function ChaptersPage() {
               hasSearch={data.search.trim() !== ''}
               noChapters={data.chapters?.length === 0}
               onCreateTopic={() => dialogs.setCreatingTopic(true)}
+              onRenameTopic={dialogs.setRenamingTopic}
+              onDeleteTopic={dialogs.setDeletingTopic}
               collapsed={collapsed}
               onExpand={() => setCollapsed(false)}
             />
@@ -191,6 +196,14 @@ export function ChaptersPage() {
         />
       )}
 
+      {dialogs.renamingTopic && (
+        <TopicRenameDialog
+          topic={dialogs.renamingTopic}
+          onRename={dialogs.submitRenameTopic}
+          onClose={() => dialogs.setRenamingTopic(null)}
+        />
+      )}
+
       <ConfirmAlertDialog
         open={dialogs.deletingChapter !== null}
         onOpenChange={(open) => !open && dialogs.setDeletingChapter(null)}
@@ -198,6 +211,15 @@ export function ChaptersPage() {
         description="This removes the chapter and every topic and canvas in it. This cannot be undone."
         confirmLabel="Delete chapter"
         onConfirm={dialogs.submitDeleteChapter}
+      />
+
+      <ConfirmAlertDialog
+        open={dialogs.deletingTopic !== null}
+        onOpenChange={(open) => !open && dialogs.setDeletingTopic(null)}
+        title={`Delete "${dialogs.deletingTopic?.name}"?`}
+        description="This removes the topic and its canvas. This cannot be undone."
+        confirmLabel="Delete topic"
+        onConfirm={dialogs.submitDeleteTopic}
       />
 
       {dialogs.deletingNotebook && (

@@ -1,4 +1,4 @@
-import { FONT_LABELS, type PresetConfig, type PresetFont } from '@/constants/presets/catalog';
+import { fontLabel, type PresetConfig, type PresetFont } from '@/constants/presets/catalog';
 import { FONT_CSS } from '@/constants/presets/font-css';
 
 const FONTS: { id: PresetFont; sample: string }[] = [
@@ -32,7 +32,7 @@ export function PresetFontsTab({
             }`}
           >
             <div>
-              <div className="text-sm font-semibold">{FONT_LABELS[f.id]}</div>
+              <div className="text-sm font-semibold">{fontLabel(f.id, config.fonts.default)}</div>
               <div className="mt-0.5 text-lg" style={{ fontFamily: FONT_CSS[f.id] }}>
                 {f.sample}
               </div>

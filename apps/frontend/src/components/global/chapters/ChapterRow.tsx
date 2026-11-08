@@ -52,8 +52,8 @@ export function ChapterRow({
           which carry one iris bar per row */}
       <span
         aria-hidden
-        className="h-5 w-[3px] shrink-0 rounded-full bg-iris"
-        style={{ opacity: active ? 1 : accentOpacity(chapter.id) * 0.7 }}
+        className="h-7 w-[3px] shrink-0 rounded-full bg-iris"
+        style={{ opacity: active ? 1 : accentOpacity(chapter.id) * 0.5 }}
       />
 
       {/* number: reserved slot, revealed on hover/active so names never shift */}

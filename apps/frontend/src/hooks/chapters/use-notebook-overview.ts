@@ -143,6 +143,28 @@ export function useNotebookOverview(notebookId: string) {
     reload();
   };
 
+  const renameTopic = async (topic: Topic, name: string) => {
+    const updated = await api.updateTopic(topic.id, { name: name.trim() });
+    setTopicsState((prev) =>
+      prev
+        ? { id: prev.id, items: prev.items.map((t) => (t.id === updated.id ? updated : t)) }
+        : prev,
+    );
+  };
+
+  const deleteTopic = async (topic: Topic) => {
+    // tldraw always needs at least one page, and that page is the topic; keep
+    // the list from deleting the last one out from under the canvas.
+    if ((topics?.length ?? 0) <= 1) {
+      throw new Error('A chapter needs at least one topic.');
+    }
+    await api.deleteTopic(topic.id);
+    setTopicsState((prev) =>
+      prev ? { id: prev.id, items: prev.items.filter((t) => t.id !== topic.id) } : prev,
+    );
+    reload(); // refresh the chapter counters in the sidebar
+  };
+
   // deleting the notebook leaves the page: navigate home on success
   const deleteNotebook = async (nb: Notebook) => {
     await api.deleteNotebook(nb.id);
@@ -176,6 +198,8 @@ export function useNotebookOverview(notebookId: string) {
     createTopic,
     renameChapter,
     deleteChapter,
+    renameTopic,
+    deleteTopic,
     deleteNotebook,
     renameNotebook,
   };
