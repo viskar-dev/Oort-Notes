@@ -11,9 +11,8 @@ import { CanvasTypeIcon } from './CanvasTypeIcon';
 import type { Chapter } from '@/lib/ipc';
 
 /** One chapter row (h-11): number slot, name, and one right slot that shows
- *  the topic count and swaps to the ⋯ menu on hover/focus. Selecting the row
- *  updates the sidebar; the canvas stays reachable through the menu (same
- *  handler the old eye button had). */
+ *  the topic count and swaps to the ⋯ menu on hover/focus. Click selects the
+ *  row; double-click opens its canvas. */
 export function ChapterRow({
   chapter,
   index,
@@ -31,11 +30,6 @@ export function ChapterRow({
 }) {
   const navigate = useNavigate();
   const openCanvas = () => navigate(`/chapters/${chapter.id}`);
-  const openCanvasOnEnter = (e: React.KeyboardEvent) => {
-    if (e.key !== 'Enter') return;
-    e.stopPropagation();
-    openCanvas();
-  };
 
   return (
     <div
@@ -44,6 +38,7 @@ export function ChapterRow({
       aria-current={active ? 'true' : undefined}
       title={chapter.name}
       onClick={() => onSelect(chapter.id)}
+      onDoubleClick={openCanvas}
       className={`group flex h-11 w-full cursor-pointer items-center gap-3 rounded-lg px-2.5 -mx-2.5 text-left transition-colors duration-150 ${
         active ? 'bg-white/[0.05]' : 'hover:bg-white/[0.03]'
       }`}
@@ -104,13 +99,6 @@ export function ChapterRow({
               align="end"
               className="w-40 rounded-lg border border-white/[0.08] bg-[#0F0F12] p-1"
             >
-              <DropdownMenuItem
-                onClick={openCanvas}
-                onKeyDown={openCanvasOnEnter}
-                className="h-8 rounded-md hover:bg-white/[0.04] text-[13px]"
-              >
-                Open canvas
-              </DropdownMenuItem>
               <DropdownMenuItem
                 onClick={() => onRename(chapter)}
                 className="h-8 rounded-md hover:bg-white/[0.04] text-[13px]"
