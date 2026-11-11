@@ -20,7 +20,7 @@ interface CanvasTopBarProps {
   /** Slot where tldraw's native main menu (⋮) is portaled into. */
   mainMenuSlotRef: RefObject<HTMLDivElement | null>;
   /** Floating header strip (name / topic / ⋮) for page chapters only;
-   *  infinite canvases get a slim hover-only bar with Back + AI + Settings. */
+   *  infinite canvases get a slim hover-only bar with Back + page menu + ⋮. */
   strip?: boolean;
   onOpenSettings: () => void;
   /** Leave the canvas, back to the chapter list in its notebook. */
@@ -130,6 +130,13 @@ export function CanvasTopBar({
             {/* tldraw's native main menu (⋮) lands here on infinite canvases too */}
             <div
               ref={mainMenuSlotRef}
+              data-tauri-drag-region
+              className="flex shrink-0 items-center"
+            />
+            {/* tldraw's native page menu (topic list) lands here — infinite
+                canvases get the same page-management dropdown as page ones */}
+            <div
+              ref={pageMenuSlotRef}
               data-tauri-drag-region
               className="flex shrink-0 items-center"
             />
