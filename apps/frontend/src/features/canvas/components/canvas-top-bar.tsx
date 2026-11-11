@@ -2,6 +2,7 @@ import { ChevronLeft, Settings, Sparkles } from 'lucide-react';
 import { useEffect, useState, type RefObject } from 'react';
 import { isTauri } from '@tauri-apps/api/core';
 import { kbdHint } from '@/lib/platform';
+import { canvasUiState } from '@/features/canvas/canvas-ui-state';
 
 /** Tooltip hint for the AI toggle, rendered per platform (⌥⌘A on macOS). */
 const AI_ASSISTANT_HINT = kbdHint('cmd+alt+a');
@@ -12,6 +13,14 @@ const AI_ASSISTANT_HINT = kbdHint('cmd+alt+a');
 const CHROME_BAND_PX = 32;
 /** Pointer must travel this far below the band before the chrome may hide. */
 const HYSTERESIS_PX = 16;
+
+/* While the user is working inside header-owned UI — an open tldraw menu or
+ * submenu (Radix portals its popup into the tldraw container with this
+ * wrapper element) or the canvas settings card — the chrome must stay put;
+ * the auto-hide only resumes once the interaction is done. */
+const isChromeEngaged = () =>
+  canvasUiState.settingsOpen ||
+  document.querySelector('[data-radix-popper-content-wrapper]') !== null;
 
 interface CanvasTopBarProps {
   chapterName: string;
@@ -48,6 +57,10 @@ export function CanvasTopBar({
     if (!isTauri()) return;
     const onMove = (e: MouseEvent) => {
       if (e.buttons !== 0) return;
+      if (isChromeEngaged()) {
+        setRevealed(true);
+        return;
+      }
       if (e.clientY <= CHROME_BAND_PX) setRevealed(true);
       else if (e.clientY > CHROME_BAND_PX + HYSTERESIS_PX) setRevealed(false);
     };
