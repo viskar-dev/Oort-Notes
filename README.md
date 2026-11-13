@@ -12,21 +12,16 @@ A canvas notebook that thinks like an IDE and teaches like a tutor.
 
 <br />
 
-<a href="https://github.com/viskar-dev/Oort-Notes/releases/latest/download/Oort.Notes_0.1.0_aarch64.dmg"><img src="docs/assets/download-macos.svg" height="44" alt="Download Oort Notes for macOS — Apple Silicon" /></a>
-&nbsp;
-<a href="https://github.com/viskar-dev/Oort-Notes/releases/latest/download/Oort.Notes_0.1.0_amd64.AppImage"><img src="docs/assets/download-linux.svg" height="44" alt="Download Oort Notes for Linux — AppImage" /></a>
-
-**Release v0.1.0** · Windows 10/11 · macOS · Linux
+**Release v0.1.0** · Windows 10/11
 <br />
-<sub>Every button downloads directly. Also: <a href="https://github.com/viskar-dev/Oort-Notes/releases/latest/download/Oort.Notes_0.1.0_x64.dmg">Intel Mac .dmg</a> · <a href="https://github.com/viskar-dev/Oort-Notes/releases/latest/download/Oort.Notes_0.1.0_amd64.deb">Linux .deb</a> · <a href="https://github.com/viskar-dev/Oort-Notes/releases/latest/download/Oort.Notes-0.1.0-1.x86_64.rpm">Linux .rpm</a> · <a href="https://github.com/viskar-dev/Oort-Notes/releases/tag/v0.1.0">all files</a></sub>
+<sub>Windows is the supported release platform. macOS and Linux can be built locally from source — see <a href="#run-it-locally">Run it locally</a> · <a href="https://github.com/viskar-dev/Oort-Notes/releases/tag/v0.1.0">all release files</a></sub>
 
 </div>
 
 ## Platform notes
 
-- **Windows 10/11 (x64):** run the `.exe` installer; the `.msi` is for managed or silent installs.
-- **macOS (Apple Silicon / Intel):** the macOS button downloads the Apple Silicon `.dmg`; Intel users can use the `.dmg` link below it. Builds are unsigned for now — on first launch, right-click the app and choose **Open**.
-- **Linux (x64):** the Linux button downloads the AppImage (run `chmod +x` first); `.deb` and `.rpm` links are below it.
+- **Windows 10/11 (x64) — supported release:** run the `.exe` installer; the `.msi` is for managed or silent installs.
+- **macOS / Linux — local builds only:** CI currently publishes Windows installers only. The app still builds on macOS and Linux from source; see [Run it locally](#run-it-locally) and [Build installers](#build-installers). Local macOS/Linux builds are unsigned — on macOS, right-click the app and choose **Open** on first launch.
 
 ## Why Oort Notes
 
@@ -73,6 +68,9 @@ A canvas notebook that thinks like an IDE and teaches like a tutor.
 
 ## Run it locally
 
+CI builds and publishes **Windows** installers only. The macOS and Linux steps
+below are kept so you can build those packages locally.
+
 **Prerequisites**
 - [Bun](https://bun.sh) (package manager and runtime)
 - [Rust](https://rustup.rs) stable
@@ -108,14 +106,18 @@ bun run --cwd apps/frontend dev
 
 **Build installers**
 
+Windows is the only platform built by CI. Local builds still work on macOS and
+Linux (run the build on the target OS; Tauri does not cross-compile these
+bundles from Windows):
+
 ```bash
 cd apps/desktop
 bunx tauri build
 ```
 
 - Windows → `target/release/bundle/nsis/*-setup.exe`, `target/release/bundle/msi/*.msi`
-- Linux → `target/release/bundle/deb/*.deb`, `rpm/*.rpm`, `appimage/*.AppImage`
-- macOS → `target/release/bundle/dmg/*.dmg`, `macos/*.app`
+- Linux (local build) → `target/release/bundle/deb/*.deb`, `rpm/*.rpm`, `appimage/*.AppImage`
+- macOS (local build) → `target/release/bundle/dmg/*.dmg`, `macos/*.app`
 - Optional: set `OORT_GOOGLE_CLIENT_ID` before building to bake in the Google Drive OAuth client.
 
 Release builds sign updater artifacts. Without the updater signing key, disable them for a local build:
@@ -133,11 +135,11 @@ cargo test -p note-core
 
 ## Auto-update
 
-- Installed desktops check GitHub Releases at launch and show an update banner in the titlebar.
-- Release builds are signed with the Tauri updater key; CI produces the updater artifacts.
+- Installed Windows desktops check GitHub Releases at launch and show an update banner in the titlebar.
+- Windows release builds are signed with the Tauri updater key; CI produces the updater artifacts.
 - Draft releases must be published before clients can see an update.
 
 ## Status
 
-- **v0.1.0** — Windows, macOS and Linux packages. Feedback is welcome via [issues](https://github.com/viskar-dev/Oort-Notes/issues).
+- **v0.1.0** — Windows packages. macOS and Linux can be built locally from source. Feedback is welcome via [issues](https://github.com/viskar-dev/Oort-Notes/issues).
 - More components and additional release channels are next.

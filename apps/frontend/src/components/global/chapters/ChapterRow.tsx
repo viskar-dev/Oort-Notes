@@ -11,9 +11,8 @@ import { CanvasTypeIcon } from './CanvasTypeIcon';
 import type { Chapter } from '@/lib/ipc';
 
 /** One chapter row (h-11): number slot, name, and one right slot that shows
- *  the topic count and swaps to the ⋯ menu on hover/focus. Selecting the row
- *  updates the sidebar; the canvas stays reachable through the menu (same
- *  handler the old eye button had). */
+ *  the topic count and swaps to the ⋯ menu on hover/focus. Click selects the
+ *  row; double-click opens its canvas. */
 export function ChapterRow({
   chapter,
   index,
@@ -31,11 +30,6 @@ export function ChapterRow({
 }) {
   const navigate = useNavigate();
   const openCanvas = () => navigate(`/chapters/${chapter.id}`);
-  const openCanvasOnEnter = (e: React.KeyboardEvent) => {
-    if (e.key !== 'Enter') return;
-    e.stopPropagation();
-    openCanvas();
-  };
 
   return (
     <div
@@ -44,6 +38,7 @@ export function ChapterRow({
       aria-current={active ? 'true' : undefined}
       title={chapter.name}
       onClick={() => onSelect(chapter.id)}
+      onDoubleClick={openCanvas}
       className={`group flex h-11 w-full cursor-pointer items-center gap-3 rounded-lg px-2.5 -mx-2.5 text-left transition-colors duration-150 ${
         active ? 'bg-white/[0.05]' : 'hover:bg-white/[0.03]'
       }`}
@@ -52,8 +47,8 @@ export function ChapterRow({
           which carry one iris bar per row */}
       <span
         aria-hidden
-        className="h-5 w-[3px] shrink-0 rounded-full bg-iris"
-        style={{ opacity: active ? 1 : accentOpacity(chapter.id) * 0.7 }}
+        className="h-7 w-[3px] shrink-0 rounded-full bg-iris"
+        style={{ opacity: active ? 1 : accentOpacity(chapter.id) * 0.5 }}
       />
 
       {/* number: reserved slot, revealed on hover/active so names never shift */}
@@ -75,17 +70,17 @@ export function ChapterRow({
 
       {/* canvas type + count ⋄ menu: one reserved slot; the tiny type icon
           sits left of the count and hover swaps both for the menu */}
-      <span className="relative grid h-7 shrink-0 place-items-center gap-1.5 grid-flow-col pr-1.5">
-        <CanvasTypeIcon type={chapter.canvas_type} className="group-hover:opacity-0 transition-opacity duration-100" />
-        <span
-          className={`text-xs text-fg-3 tabular-nums transition-opacity duration-100 ${
-            active ? 'opacity-100 group-hover:opacity-0' : 'group-hover:opacity-0'
-          }`}
-        >
-          {chapter.topics_count}
+      {/* One right-side state at a time: the type icon + count, or the ⋯
+          menu on hover/focus, in the same fixed-width slot. Hide the
+          default cluster for both hover and focus-within so selecting a
+          row cannot show all three at once. */}
+      <span className="relative h-7 w-12 shrink-0">
+        <span className="absolute inset-0 flex items-center justify-end gap-1.5 pr-1 group-hover:hidden group-focus-within:hidden">
+          <CanvasTypeIcon type={chapter.canvas_type} />
+          <span className="text-xs text-fg-3 tabular-nums">{chapter.topics_count}</span>
         </span>
         <span
-          className="absolute inset-0 grid place-items-center opacity-0 transition-opacity duration-100 group-hover:opacity-100 group-focus-within:opacity-100"
+          className="absolute inset-0 flex items-center justify-end pr-1 opacity-0 transition-opacity duration-100 group-hover:opacity-100 group-focus-within:opacity-100"
           onClick={(e) => e.stopPropagation()}
         >
           <DropdownMenu>
@@ -104,13 +99,6 @@ export function ChapterRow({
               align="end"
               className="w-40 rounded-lg border border-white/[0.08] bg-[#0F0F12] p-1"
             >
-              <DropdownMenuItem
-                onClick={openCanvas}
-                onKeyDown={openCanvasOnEnter}
-                className="h-8 rounded-md hover:bg-white/[0.04] text-[13px]"
-              >
-                Open canvas
-              </DropdownMenuItem>
               <DropdownMenuItem
                 onClick={() => onRename(chapter)}
                 className="h-8 rounded-md hover:bg-white/[0.04] text-[13px]"

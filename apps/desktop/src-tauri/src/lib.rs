@@ -90,6 +90,38 @@ async fn delete_notebook(id: String, pool: State<'_, SqlitePool>) -> R<()> {
     repo::soft_delete_notebook(&pool, &id).await.map_err(map)
 }
 
+#[tauri::command]
+async fn export_notebook(id: String, pool: State<'_, SqlitePool>) -> R<String> {
+    note_core::share::build_notebook_share(&pool, &id)
+        .await
+        .map_err(map)
+}
+
+#[tauri::command]
+async fn import_notebook(
+    archive: String,
+    name: Option<String>,
+    pool: State<'_, SqlitePool>,
+) -> R<Notebook> {
+    note_core::share::import_notebook(&pool, &archive, name.as_deref())
+        .await
+        .map_err(map)
+}
+
+#[tauri::command]
+async fn write_oort_export(path: String, contents: String) -> R<()> {
+    std::fs::write(&path, contents).map_err(|e| format!("Could not write {path}: {e}"))
+}
+
+#[tauri::command]
+async fn read_oort_import(path: String) -> R<String> {
+    let metadata = std::fs::metadata(&path).map_err(|e| format!("Could not read {path}: {e}"))?;
+    if metadata.len() > 64 * 1024 * 1024 {
+        return Err("This .oort file is larger than 64 MB.".to_string());
+    }
+    std::fs::read_to_string(&path).map_err(|e| format!("Could not read {path}: {e}"))
+}
+
 // =========================
 // Chapters
 // =========================
@@ -327,12 +359,39 @@ use note_core::backup;
 use note_core::google::{self, DriveClient, GoogleConfig, Pkce};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-fn browser_tab_html() -> String {
-    "<!doctype html><html><head><meta charset=\"utf-8\"><title>Oort Notes</title></head>\
-     <body style=\"font-family: sans-serif; text-align: center; padding-top: 4rem\">\
-     <h2>You're connected</h2><p>You can close this tab and return to the app.</p>\
-     </body></html>"
-      .to_string()
+/// The tab the system browser lands on after the loopback redirect. `ok` is
+/// only true once the authorization code was exchanged AND the refresh token
+/// was stored — the tab must never claim success for a connection the app
+/// does not actually have.
+fn browser_tab_html(ok: bool) -> String {
+    let (heading, body) = if ok {
+        (
+            "You're connected",
+            "You can close this tab and return to the app.",
+        )
+    } else {
+        (
+            "Connection failed",
+            "Google Drive didn't connect. Close this tab, return to the app and try again.",
+        )
+    };
+    format!(
+        "<!doctype html><html><head><meta charset=\"utf-8\"><title>Oort Notes</title></head>\
+         <body style=\"font-family: sans-serif; text-align: center; padding-top: 4rem\">\
+         <h2>{heading}</h2><p>{body}</p>\
+         </body></html>"
+    )
+}
+
+/// Writes one complete HTTP response to the loopback client and closes it.
+async fn write_browser_response(stream: &mut tokio::net::TcpStream, status: &str, body: &str) {
+    let response = format!(
+        "HTTP/1.1 {status}\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        body.len(),
+        body
+    );
+    let _ = stream.write_all(response.as_bytes()).await;
+    let _ = stream.shutdown().await;
 }
 
 /// Percent-decoding for the redirect query parameters.
@@ -355,12 +414,14 @@ fn urldecode(s: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
-/// Serves the loopback redirect: answers every request (so the tab finishes
-/// loading) and returns the `code` once the right `state` comes back.
+/// Serves the loopback redirect and returns the `code` once the right `state`
+/// comes back, together with the still-open browser connection. The caller
+/// answers that connection only after the code exchange and token storage
+/// succeed (or writes the failure page when they don't).
 async fn wait_for_code(
     listener: tokio::net::TcpListener,
     expected_state: &str,
-) -> Result<String, String> {
+) -> Result<(String, tokio::net::TcpStream), String> {
     let deadline = std::time::Duration::from_secs(300);
     let mut buf = [0u8; 8192];
     loop {
@@ -369,45 +430,50 @@ async fn wait_for_code(
             .map_err(|_| "timed out waiting for the browser redirect".to_string())?
             .map_err(|e| e.to_string())?;
         let read = tokio::time::timeout(std::time::Duration::from_secs(5), stream.read(&mut buf))
-            .await
-            .map_err(|_| "browser redirect read timed out".to_string())?
-            .map_err(|e| e.to_string())?;
+            .await;
+        // browsers sometimes open speculative connections that never send a
+        // request — ignore them instead of aborting the whole flow
+        let read = match read {
+            Ok(Ok(n)) if n > 0 => n,
+            _ => continue,
+        };
         let text = String::from_utf8_lossy(&buf[..read]);
         let target = text.split_whitespace().nth(1).unwrap_or("").to_string();
 
-        // answer the browser so the tab doesn't hang
-        let response = if target.contains("favicon") {
-            "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_string()
-        } else {
-            format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-                browser_tab_html().len(),
-                browser_tab_html()
-            )
-        };
-        let _ = stream.write_all(response.as_bytes()).await;
-        let _ = stream.shutdown().await;
         if target.contains("favicon") {
+            write_browser_response(&mut stream, "404 Not Found", "").await;
             continue;
         }
 
         let query = target.split('?').nth(1).unwrap_or("");
         let mut code = None;
         let mut state = None;
+        let mut denied = None;
         for pair in query.split('&') {
-            if let Some(v) = pair.strip_prefix("code=") {
-                code = Some(urldecode(v));
-            }
-            if let Some(v) = pair.strip_prefix("state=") {
-                state = Some(urldecode(v));
+            let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
+            match key {
+                "code" => code = Some(urldecode(value)),
+                "state" => state = Some(urldecode(value)),
+                "error" => denied = Some(urldecode(value)),
+                _ => {}
             }
         }
+
+        // consent denied / provider error: stop waiting instead of hanging
+        // the app until the listener times out
+        if let Some(error) = denied {
+            tracing::warn!("google oauth returned an error: {error}");
+            write_browser_response(&mut stream, "400 Bad Request", &browser_tab_html(false)).await;
+            return Err(format!("google authorization failed: {error}"));
+        }
+
         if let (Some(c), Some(s)) = (code, state) {
             if s == expected_state {
-                return Ok(c);
+                return Ok((c, stream));
             }
         }
-        // stray request (wrong state) — keep listening
+        // stray request (prefetch, wrong state) — answer it and keep listening
+        write_browser_response(&mut stream, "400 Bad Request", &browser_tab_html(false)).await;
     }
 }
 
@@ -516,42 +582,77 @@ async fn google_connect(pool: State<'_, SqlitePool>) -> R<GoogleStatusView> {
     tauri_plugin_opener::open_url(&url, None::<&str>)
         .map_err(|e| format!("could not open the browser: {e}"))?;
 
-    // 3. wait for the redirect with the authorization code
-    let code = wait_for_code(listener, &state_param).await?;
+    // 3. wait for the redirect with the authorization code (the browser
+    // connection stays open so we can answer with the real outcome)
+    let (code, mut browser) = wait_for_code(listener, &state_param).await?;
 
-    // 4. exchange the code; desktop clients prove themselves with PKCE
-    let http = reqwest::Client::new();
-    let tokens = google::exchange_code(&http, &config, &redirect_uri, &code, &pkce.verifier)
-        .await
-        .map_err(map)?;
-    let refresh_token = tokens
-        .refresh_token
-        .ok_or_else(|| "google did not return a refresh token".to_string())?;
-    let email = google::fetch_userinfo_email(&http, &config, &tokens.access_token).await;
+    // Bound every Google call: a stalled network must surface as an error,
+    // not leave the app stuck on "Connecting…" forever.
+    let http = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(45))
+        .build()
+        .map_err(|e| e.to_string())?;
 
-    // 5. refresh token → OS keychain; identity → database (no secret there)
-    let token_for_keyring = refresh_token.clone();
-    tokio::task::spawn_blocking(move || backup::keyring_store::store_refresh_token(&token_for_keyring))
+    // 4. exchange the code + persist the token. Everything must succeed before
+    // the browser tab is told the connection worked.
+    let result = async {
+        let tokens = google::exchange_code(&http, &config, &redirect_uri, &code, &pkce.verifier)
+            .await
+            .map_err(map)?;
+        let refresh_token = tokens
+            .refresh_token
+            .ok_or_else(|| "google did not return a refresh token".to_string())?;
+        let email = google::fetch_userinfo_email(&http, &config, &tokens.access_token).await;
+
+        // refresh token → OS keychain; identity → database (no secret there)
+        let token_for_keyring = refresh_token.clone();
+        tokio::task::spawn_blocking(move || {
+            backup::keyring_store::store_refresh_token(&token_for_keyring)
+        })
         .await
         .map_err(|e| e.to_string())?
         .map_err(map)?;
-    repo::save_google_account(&pool, email.as_deref(), None, google::SCOPES)
-        .await
-        .map_err(map)?;
+        repo::save_google_account(&pool, email.as_deref(), None, google::SCOPES)
+            .await
+            .map_err(map)?;
 
-    // 6. first backup right away, so the user sees the pipeline work (skipped
-    // while the workspace is still empty, so a fresh install can import
-    // first); the scheduler retries failures later
-    let client = DriveClient::new(config, refresh_token);
-    if let Err(e) = backup::run_backup(&pool, &client).await {
-        tracing::warn!("first backup after connect failed: {e}");
+        Ok::<_, String>((email, refresh_token))
     }
+    .await;
 
-    Ok(GoogleStatusView {
-        connected: true,
-        email,
-        configured: true,
-    })
+    match result {
+        Ok((email, refresh_token)) => {
+            write_browser_response(&mut browser, "200 OK", &browser_tab_html(true)).await;
+
+            // first backup in the background: the connect command returns as
+            // soon as the account is stored, so the app flips to Connected
+            // immediately instead of waiting on the upload (a large workspace
+            // used to keep the command — and the UI — pending for minutes)
+            let pool2 = pool.inner().clone();
+            let client = DriveClient::new(config, refresh_token);
+            tauri::async_runtime::spawn(async move {
+                if let Err(e) = backup::run_backup(&pool2, &client).await {
+                    tracing::warn!("first backup after connect failed: {e}");
+                }
+            });
+
+            Ok(GoogleStatusView {
+                connected: true,
+                email,
+                configured: true,
+            })
+        }
+        Err(e) => {
+            tracing::warn!("google connect failed: {e}");
+            write_browser_response(
+                &mut browser,
+                "500 Internal Server Error",
+                &browser_tab_html(false),
+            )
+            .await;
+            Err(e)
+        }
+    }
 }
 
 #[tauri::command]
@@ -709,6 +810,7 @@ pub fn run() {
         .plugin(tauri_plugin_decoration::init())
         .plugin(tauri_plugin_sql::Builder::default().build())
         .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             // auto-update is a desktop-only concern
             #[cfg(desktop)]
@@ -756,6 +858,10 @@ pub fn run() {
             update_notebook_flags,
             load_notebook,
             delete_notebook,
+            export_notebook,
+            import_notebook,
+            write_oort_export,
+            read_oort_import,
             create_chapter,
             list_chapters,
             load_chapter,

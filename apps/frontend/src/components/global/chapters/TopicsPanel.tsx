@@ -1,5 +1,11 @@
 import { useNavigate } from 'react-router-dom';
-import { ChevronRight, PanelLeftOpen, Plus } from 'lucide-react';
+import { MoreVertical, PanelLeftOpen, Plus } from 'lucide-react';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { timeAgo } from '@/lib/canvas';
 import { CanvasTypeIcon } from './CanvasTypeIcon';
 import { Empty, EmptyContent, EmptyHeader, EmptyMedia, EmptyTitle, EmptyDescription } from '@/components/ui/empty';
@@ -7,8 +13,8 @@ import type { Chapter, Topic } from '@/lib/ipc';
 
 /** The right column of the notebook screen: the chapter's topic list. The
  *  header block (h-20) holds the chapter name + meta and the ghost "New
- *  topic"; rows are h-11 with the same reserved number/timestamp/chevron
- *  slots on every row. */
+ *  topic"; rows are h-11 with the same reserved number/timestamp/menu slots
+ *  on every row. */
 export function TopicsPanel({
   chapter,
   topics,
@@ -16,6 +22,8 @@ export function TopicsPanel({
   hasSearch,
   noChapters,
   onCreateTopic,
+  onRenameTopic,
+  onDeleteTopic,
   collapsed,
   onExpand,
 }: {
@@ -25,6 +33,8 @@ export function TopicsPanel({
   hasSearch: boolean;
   noChapters: boolean;
   onCreateTopic: () => void;
+  onRenameTopic: (topic: Topic) => void;
+  onDeleteTopic: (topic: Topic) => void;
   /** Presentational sidebar state owned by the page. */
   collapsed?: boolean;
   onExpand?: () => void;
@@ -115,28 +125,72 @@ export function TopicsPanel({
             </Empty>
           </div>
         )}
-        {topics?.map((topic, i) => (
-          <button
-            key={topic.id}
-            onClick={() => navigate(`/chapters/${chapter.id}?topic=${topic.id}`)}
-            className="group flex h-11 w-full items-center gap-3 rounded-lg px-3 text-left transition-colors duration-150 hover:bg-white/[0.03] focus-visible:bg-white/[0.03]"
-          >
-            <span className="w-12 shrink-0 text-xs text-fg-3 tabular-nums">
-              {chapterIndex + 1}.{i + 1}
-            </span>
-            <span className="min-w-0 flex-1 truncate text-sm text-fg-1">{topic.name}</span>
-            <span className="w-14 shrink-0 text-right text-xs text-fg-3 tabular-nums">
-              {timeAgo(topic.updated_at)}
-            </span>
-            {/* chevron: reserved w-4 slot, slides 2px into place on hover */}
-            <span className="w-4 shrink-0">
-              <ChevronRight
-                className="h-3.5 w-3.5 text-fg-3 opacity-0 -translate-x-0.5 transition-all duration-150 group-hover:translate-x-0 group-hover:opacity-100"
-                strokeWidth={1.5}
-              />
-            </span>
-          </button>
-        ))}
+        {topics?.map((topic, i) => {
+          const openTopic = () => navigate(`/chapters/${chapter.id}?topic=${topic.id}`);
+          return (
+            <div
+              key={topic.id}
+              role="button"
+              tabIndex={0}
+              title={topic.name}
+              onClick={openTopic}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  openTopic();
+                }
+              }}
+              className="group flex h-11 w-full cursor-pointer items-center gap-3 rounded-lg px-3 text-left transition-colors duration-150 hover:bg-white/[0.03] focus-visible:bg-white/[0.03]"
+            >
+              <span className="w-12 shrink-0 text-xs text-fg-3 tabular-nums">
+                {chapterIndex + 1}.{i + 1}
+              </span>
+              <span className="min-w-0 flex-1 truncate text-sm text-fg-1">{topic.name}</span>
+              <span className="w-14 shrink-0 text-right text-xs text-fg-3 tabular-nums">
+                {timeAgo(topic.updated_at)}
+              </span>
+              {/* ⋯ menu: reserved slot, revealed on hover/focus like the
+                  chapter rows; the row itself still opens the topic */}
+              <span
+                className="grid h-7 w-7 shrink-0 place-items-center opacity-0 transition-opacity duration-100 group-hover:opacity-100 group-focus-within:opacity-100"
+                onClick={(e) => e.stopPropagation()}
+                onKeyDown={(e) => e.stopPropagation()}
+              >
+                <DropdownMenu>
+                  <DropdownMenuTrigger
+                    render={
+                      <button
+                        aria-label={`Options for ${topic.name}`}
+                        title="Topic options"
+                        className="flex h-7 w-7 items-center justify-center rounded-lg text-fg-3 transition-colors duration-150 hover:bg-white/[0.04] hover:text-fg-1"
+                      >
+                        <MoreVertical className="h-3.5 w-3.5" strokeWidth={1.5} />
+                      </button>
+                    }
+                  />
+                  <DropdownMenuContent
+                    align="end"
+                    className="w-40 rounded-lg border border-white/[0.08] bg-[#0F0F12] p-1"
+                  >
+                    <DropdownMenuItem
+                      onClick={() => onRenameTopic(topic)}
+                      className="h-8 rounded-md hover:bg-white/[0.04] text-[13px]"
+                    >
+                      Rename
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      variant="destructive"
+                      onClick={() => onDeleteTopic(topic)}
+                      className="h-8 rounded-md text-[13px]"
+                    >
+                      Delete
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </span>
+            </div>
+          );
+        })}
       </div>
     </section>
   );

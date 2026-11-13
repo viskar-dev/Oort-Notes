@@ -6,6 +6,7 @@ pub mod google;
 pub mod icons;
 pub mod models;
 pub mod repo;
+pub mod share;
 
 pub use db::{init_memory_pool, init_pool};
 pub use error::CoreError;

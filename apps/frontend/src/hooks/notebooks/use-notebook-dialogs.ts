@@ -9,11 +9,13 @@ import type { NotebookFlagChanges, NotebookCreateInput } from '@/hooks/notebooks
  *  the dialog open and surface through the page's error banner. */
 export function useNotebookDialogs({
   createNotebook,
+  importNotebook,
   updateNotebook,
   deleteNotebook,
   onError,
 }: {
   createNotebook: (input: NotebookCreateInput) => Promise<void>;
+  importNotebook: (archive: string, name?: string) => Promise<void>;
   updateNotebook: (nb: Notebook, flags: NotebookFlagChanges) => Promise<void>;
   deleteNotebook: (nb: Notebook) => Promise<void>;
   onError: (message: string) => void;
@@ -35,6 +37,16 @@ export function useNotebookDialogs({
       await createNotebook(input);
       closeCreate();
       toast.success('Notebook created', { description: input.name });
+    } catch (e) {
+      onError(errorText(e));
+    }
+  };
+
+  const submitImport = async (archive: string, name: string) => {
+    try {
+      await importNotebook(archive, name);
+      closeCreate();
+      toast.success('Notebook imported', { description: name });
     } catch (e) {
       onError(errorText(e));
     }
@@ -73,6 +85,7 @@ export function useNotebookDialogs({
     closeRename,
     closeDelete,
     submitCreate,
+    submitImport,
     submitRename,
     submitDelete,
   };

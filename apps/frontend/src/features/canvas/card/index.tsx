@@ -35,7 +35,7 @@ export type CalloutIcon =
   | 'bookmark'
   | 'zap'
   | 'help';
-type Field = 'title' | 'badge' | 'body';
+type Field = 'title' | 'body';
 
 type CalloutProps = {
   w: number;
@@ -158,7 +158,7 @@ const CSS = `
 .tl-cc-head{display:flex;align-items:center;gap:10px}
 .tl-cc-icon{flex:none;display:inline-flex;color:var(--cb-accent)}
 .tl-cc-title{flex:1;min-width:0;font-size:15px;font-weight:600;line-height:1.4;color:var(--cb-strong)}
-.tl-cc-badge{flex:none;max-width:40%;font-size:13px;line-height:1.4;color:var(--cb-muted);text-align:right}
+.tl-cc-pin{flex:none;display:inline-flex;color:var(--cb-accent);opacity:.9}
 .tl-cc-body{margin-top:10px;font-size:13.5px;line-height:1.6;color:var(--cb-muted)}
 .tl-cc-card code{font-family:var(--tl-font-mono,ui-monospace,monospace);font-size:.92em;color:var(--cb-strong);background:none;padding:0}
 .tl-cc-field{position:relative;min-height:1.4em;user-select:none;border-radius:4px}
@@ -245,7 +245,7 @@ function CalloutView({ shape }: { shape: CalloutCardShape }) {
   const editor = useEditor();
   ensureStyles();
 
-  const { w, h, variant, icon, showIcon, showBadge, tinted, collapsed } = shape.props;
+  const { w, h, variant, icon, showIcon, tinted, collapsed, pinned } = shape.props;
   const innerRef = useRef<HTMLDivElement>(null);
 
   const isDark = useValue('callout dark', () => editor.user.getIsDarkMode(), [editor]);
@@ -259,7 +259,7 @@ function CalloutView({ shape }: { shape: CalloutCardShape }) {
     [shape.id],
   );
 
-  const order: Field[] = ['title', ...(showBadge ? (['badge'] as Field[]) : []), ...(collapsed ? [] : (['body'] as Field[]))];
+  const order: Field[] = ['title', ...(collapsed ? [] : (['body'] as Field[]))];
 
   // entering edit mode: open the pressed field, else the title
   useEffect(() => {
@@ -273,11 +273,11 @@ function CalloutView({ shape }: { shape: CalloutCardShape }) {
     }
   }, [isEditing, shape.id, active]);
 
-  // a field was hidden (badge off, collapsed) while open
+  // a field was hidden (collapsed) while open
   useEffect(() => {
     const a = activeField.get();
     if (a && a.id === shape.id && !order.includes(a.field)) activeField.set({ id: shape.id, field: 'title' });
-  }, [showBadge, collapsed, shape.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [collapsed, shape.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // height follows content
   useEffect(() => {
@@ -370,7 +370,11 @@ function CalloutView({ shape }: { shape: CalloutCardShape }) {
               </span>
             )}
             {renderField('title', 'tl-cc-title', 'Title')}
-            {showBadge && renderField('badge', 'tl-cc-badge', 'Badge')}
+            {pinned && (
+              <span className="tl-cc-pin" title="Pinned" aria-label="Pinned">
+                <IconSvg name="pin" size={14} />
+              </span>
+            )}
           </div>
           {!collapsed && renderField('body', 'tl-cc-body', 'Write something…')}
         </div>
@@ -450,10 +454,10 @@ export class CalloutCardUtil extends BaseBoxShapeUtil<CalloutCardShape> {
       variant: 'note',
       icon: 'dot',
       title: toRichText('Note: Assumption Bounds'),
-      badge: toRichText('Pinned'),
+      badge: toRichText(''),
       body: DEFAULT_BODY,
       showIcon: true,
-      showBadge: true,
+      showBadge: false,
       tinted: false,
       collapsed: false,
       pinned: false,

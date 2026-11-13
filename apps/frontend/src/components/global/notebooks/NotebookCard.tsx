@@ -15,6 +15,7 @@ export function NotebookCard({
   onRename,
   onToggleFavorite,
   onToggleArchive,
+  onExport,
   onDelete,
 }: {
   notebook: Notebook;
@@ -23,6 +24,7 @@ export function NotebookCard({
   onRename: () => void;
   onToggleFavorite: () => void;
   onToggleArchive: () => void;
+  onExport: () => void;
   onDelete: () => void;
 }) {
   const archived = nb.archived_at !== null;
@@ -93,7 +95,7 @@ export function NotebookCard({
             </button>
           }
         />
-        <NotebookMenu nb={nb} archived={archived} onOpen={onOpen} onRename={onRename} onToggleFavorite={onToggleFavorite} onToggleArchive={onToggleArchive} onDelete={onDelete} />
+        <NotebookMenu nb={nb} archived={archived} onOpen={onOpen} onRename={onRename} onToggleFavorite={onToggleFavorite} onToggleArchive={onToggleArchive} onExport={onExport} onDelete={onDelete} />
       </DropdownMenu>
     </div>
   );

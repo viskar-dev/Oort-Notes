@@ -1,4 +1,4 @@
-import { createContext, Fragment, useContext, useEffect, useRef, useState } from 'react';
+import { Fragment, useContext, useEffect, useRef, useState } from 'react';
 import { Blocks, ChevronUp } from 'lucide-react';
 import {
   AssetToolbarItem,
@@ -29,6 +29,7 @@ import { defaultConfig } from '@/lib/preset-config';
 import { TEXT_BASE_PX, type ToolId } from '@/constants/presets/catalog';
 import { useUiPresetStore } from '@/stores/ui-preset-store';
 import { ComponentsMenuContent } from './ComponentsMenu';
+import { ToolbarAutoHideContext, ZoomSlotContext } from './toolbar-context';
 
 /** The toolbar a chapter sees without an assigned preset: the same strip a
  *  fresh preset produces (with the collapsed Shapes picker) rather than
@@ -38,21 +39,13 @@ const FALLBACK_CONFIG = defaultConfig();
 /** How many tool buttons fit the pill; the rest move behind the more button. */
 const MAX_STRIP_TOOLS = 10;
 
-/**
- * Slot that carries the chapter's zoom menu into the toolbar. tldraw renders
- * the Toolbar from its components map, so the zoom control travels through a
- * context rather than a prop: the Toolbar component itself must keep a stable
- * identity, otherwise React remounts it (and tldraw's whole UI provider) on
- * every render.
- */
-export const ZoomSlotContext = createContext<React.ReactNode>(null);
-
 /** Stable toolbar override; reads the zoom slot and renders the pill. */
 export function ToolbarOverride() {
   const zoomMenu = useContext(ZoomSlotContext);
+  const autoHide = useContext(ToolbarAutoHideContext);
   // view mode: no chrome, just the sheets
   if (useViewMode()) return null;
-  return <PresetToolbar zoomMenu={zoomMenu} />;
+  return <PresetToolbar zoomMenu={zoomMenu} autoHide={autoHide} />;
 }
 
 /**
@@ -117,7 +110,7 @@ const TOOL_ITEMS: Partial<Record<ToolId, () => React.JSX.Element>> = {
  * canvas-zoom readout closes the row behind a hairline divider so the whole
  * row stays one pill.
  */
-function PresetToolbar({ zoomMenu }: { zoomMenu?: React.ReactNode }) {
+function PresetToolbar({ zoomMenu, autoHide }: { zoomMenu?: React.ReactNode; autoHide: boolean }) {
   const editor = useEditor();
   const presetConfig = useUiPresetStore((s) => s.config);
   const config = presetConfig ?? FALLBACK_CONFIG;
@@ -128,15 +121,23 @@ function PresetToolbar({ zoomMenu }: { zoomMenu?: React.ReactNode }) {
     () => editor.getCurrentToolId() === 'components',
     [editor],
   );
-  // idle dimming: the pill fades to 20% unless the pointer is over it or a
-  // drawing tool (anything other than select) is active
+  // idle dimming: the pill fades to 20% unless the pointer is over it, it has
+  // keyboard focus, a toolbar menu/tool is active, or a drawing tool (anything
+  // other than select) is active. Auto-hide can be turned off in canvas
+  // settings, which keeps the pill fully visible.
   const [hovered, setHovered] = useState(false);
+  const [focused, setFocused] = useState(false);
   const isSelectTool = useValue(
     'toolbar idle',
     () => editor.getCurrentToolId() === 'select',
     [editor],
   );
-  const dimmed = !hovered && !isActive && isSelectTool;
+  const isEditing = useValue(
+    'toolbar editing shape',
+    () => editor.getEditingShapeId() !== null,
+    [editor],
+  );
+  const dimmed = autoHide && !hovered && !focused && !isActive && !isEditing && isSelectTool;
 
   // apply the preset's defaults: font for new shapes, and M-size for new
   // text (tldraw's text base is 24px, so scale = px / 24). The font always
@@ -203,6 +204,10 @@ function PresetToolbar({ zoomMenu }: { zoomMenu?: React.ReactNode }) {
       ref={wheelRef}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
+      onFocusCapture={() => setFocused(true)}
+      onBlurCapture={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setFocused(false);
+      }}
       style={{ opacity: dimmed ? 0.2 : 1, transition: 'opacity 150ms ease-out' }}
     >
       <div className="tlui-toolbar">

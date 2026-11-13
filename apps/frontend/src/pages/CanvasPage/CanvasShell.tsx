@@ -32,7 +32,7 @@ import { AiCanvasPrompt } from '@/features/ai/components/ai-canvas-prompt';
 import { AiGhostLayer } from '@/features/ai/components/ai-ghost-layer';
 import { useAiBridge } from '@/features/ai/use-ai-bridge';
 import { AiBusyPill } from '@/features/ai/components/ai-busy-pill';
-import { ZoomSlotContext } from '@/components/global/canvas/PresetToolbar';
+import { ToolbarAutoHideContext, ZoomSlotContext } from '@/components/global/canvas/toolbar-context';
 import { CanvasSettingsCard } from '@/components/global/canvas/CanvasSettingsCard';
 import { ViewModeHint } from '@/components/global/canvas/ViewModeHint';
 import { useChapterCanvas, SHEET_GAP, type CanvasDeeplink } from '@/hooks/canvas/use-chapter-canvas';
@@ -62,6 +62,11 @@ export function CanvasShell({ notebook, chapter }: { notebook: Notebook; chapter
     const stored = Number(localStorage.getItem('oort:content-inset'));
     return Number.isFinite(stored) && stored >= 0 ? stored : 24;
   });
+  // the toolbar's idle fade is on by default (its pre-setting behavior);
+  // only an explicit "false" turns it off
+  const [autoHideToolbar, setAutoHideToolbar] = useState(
+    () => localStorage.getItem('oort:auto-hide-toolbar') !== 'false',
+  );
   const paddingRef = useRef(pagePadding);
   paddingRef.current = pagePadding;
   const insetRef = useRef(contentInset);
@@ -258,6 +263,11 @@ export function CanvasShell({ notebook, chapter }: { notebook: Notebook; chapter
     insetRef.current = clamped;
   }
 
+  function handleAutoHideToolbarChange(value: boolean) {
+    setAutoHideToolbar(value);
+    localStorage.setItem('oort:auto-hide-toolbar', String(value));
+  }
+
   return (
     <>
         <div className="relative flex h-dvh w-full flex-col overflow-hidden bg-canvas">
@@ -289,33 +299,35 @@ export function CanvasShell({ notebook, chapter }: { notebook: Notebook; chapter
                 produce around page sheets, so both look alike */}
             <div className={`oort-editor absolute inset-0 ${isPageChapter ? 'oort-pages' : 'oort-infinite'}`}>
               <ZoomSlotContext.Provider value={ui.zoomSlot}>
-                <Tldraw
-                  tools={[ComponentsTool]}
-                  shapeUtils={[CodeBlockUtil, SvgDiagramUtil, MathBlockUtil, TableUtil, CalloutCardUtil, IconUtil]}
-                  overrides={oortShortcutOverrides}
-                  assetUrls={ASSET_URLS}
-                  textOptions={ui.textOptions}
-                  onMount={(editor) => {
-                    handleMount(editor);
-                    attachEditReveal(editor);
-                    // text pasted onto the canvas runs table detection first,
-                    // then math detection, then tldraw's default text handler
-                    registerTablePaste(editor, (content) => pasteTextWithMath(editor, content));
-                  }}
-                  components={ui.components}
-                >
-                  {isPageChapter &&
-                    chapter.page_width &&
-                    chapter.page_height &&
-                    activePages.length > 0 && (
-                      <PageFrameStack
-                        width={chapter.page_width}
-                        height={chapter.page_height}
-                        gap={SHEET_GAP}
-                        count={activePages.length}
-                      />
-                    )}
-                </Tldraw>
+                <ToolbarAutoHideContext.Provider value={autoHideToolbar}>
+                  <Tldraw
+                    tools={[ComponentsTool]}
+                    shapeUtils={[CodeBlockUtil, SvgDiagramUtil, MathBlockUtil, TableUtil, CalloutCardUtil, IconUtil]}
+                    overrides={oortShortcutOverrides}
+                    assetUrls={ASSET_URLS}
+                    textOptions={ui.textOptions}
+                    onMount={(editor) => {
+                      handleMount(editor);
+                      attachEditReveal(editor);
+                      // text pasted onto the canvas runs table detection first,
+                      // then math detection, then tldraw's default text handler
+                      registerTablePaste(editor, (content) => pasteTextWithMath(editor, content));
+                    }}
+                    components={ui.components}
+                  >
+                    {isPageChapter &&
+                      chapter.page_width &&
+                      chapter.page_height &&
+                      activePages.length > 0 && (
+                        <PageFrameStack
+                          width={chapter.page_width}
+                          height={chapter.page_height}
+                          gap={SHEET_GAP}
+                          count={activePages.length}
+                        />
+                      )}
+                  </Tldraw>
+                </ToolbarAutoHideContext.Provider>
               </ZoomSlotContext.Provider>
             </div>
           </ViewModeContext.Provider>
@@ -384,6 +396,8 @@ export function CanvasShell({ notebook, chapter }: { notebook: Notebook; chapter
             chapterPresetId={preset.chapterPresetId}
             uiPresets={preset.uiPresets}
             onApplyPreset={(id) => void preset.applyPreset(id)}
+            autoHideToolbar={autoHideToolbar}
+            onAutoHideToolbarChange={handleAutoHideToolbarChange}
           />
 
         </div>

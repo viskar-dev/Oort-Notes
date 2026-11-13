@@ -30,7 +30,7 @@ export function PresetLivePreview({ config }: { config: PresetConfig }) {
         </div>
         {/* sample text */}
         <div className="px-6 pt-28 text-center" style={{ color: '#e8e8ea' }}>
-          <div style={{ fontFamily: config.fonts.default === 'draw' ? FONT_CSS.draw : undefined }}>
+          <div style={{ fontFamily: FONT_CSS[config.fonts.default] }}>
             <div style={{ fontSize: config.sizes.p, lineHeight: 1.4 }}>Aa Bb Cc 123</div>
             <div style={{ fontSize: config.sizes.p, opacity: 0.7, marginTop: 6 }}>
               H1 {config.sizes.h1} · H2 {config.sizes.h2} · H3 {config.sizes.h3} · P {config.sizes.p} px

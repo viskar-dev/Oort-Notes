@@ -192,6 +192,8 @@ export interface Transport {
     icon?: string,
   ): Promise<Notebook>;
   deleteNotebook(id: string): Promise<void>;
+  exportNotebook(id: string): Promise<string>;
+  importNotebook(archive: string, name?: string): Promise<Notebook>;
 
   listPagePresets(): Promise<PagePreset[]>;
   listChapters(notebookId: string): Promise<Chapter[]>;

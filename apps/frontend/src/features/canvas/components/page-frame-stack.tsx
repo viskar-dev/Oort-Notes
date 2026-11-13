@@ -79,9 +79,11 @@ export function PageFrameStack({
               top: top.y,
               width: bottom.x - top.x,
               height: bottom.y - top.y,
-              // small per-sheet elevation shadow (cheap: page-sized, not
-              // viewport-sized)
-              boxShadow: '0 12px 32px rgba(0,0,0,0.5), 0 3px 10px rgba(0,0,0,0.4)',
+              // Clean, contained elevation (cheap: page-sized, not
+              // viewport-sized). A close contact shadow plus a short, soft
+              // lift keeps the edge crisp without spilling into the canvas.
+              boxShadow:
+                'inset 0 1px 0 rgba(255,255,255,0.045), 0 1px 2px rgba(0,0,0,0.28), 0 4px 12px rgba(0,0,0,0.16)',
             }}
           >
             {/* solid background on purpose: backdrop-blur re-filters the canvas

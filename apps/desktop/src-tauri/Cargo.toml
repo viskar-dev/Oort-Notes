@@ -34,6 +34,7 @@ tauri-plugin-decoration = "3"
 # auto-update (updater: desktop targets only, see setup in lib.rs)
 tauri-plugin-updater.workspace = true
 tauri-plugin-process.workspace = true
+tauri-plugin-dialog.workspace = true
 
 [lints]
 workspace = true

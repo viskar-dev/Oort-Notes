@@ -1,12 +1,13 @@
 import { useEffect, useRef } from 'react';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Switch } from '@/components/ui/switch';
 import type { UiPreset } from '@/lib/ipc';
 
 /** The canvas settings popover (opened from the top bar): page padding and
- *  content boundary for page chapters, and the chapter's UI preset. It
- *  closes on outside clicks, excluding the top bar's settings button which
- *  toggles it itself. */
+ *  content boundary for page chapters, the chapter's UI preset and the
+ *  toolbar's idle behavior. It closes on outside clicks, excluding the top
+ *  bar's settings button which toggles it itself. */
 export function CanvasSettingsCard({
   open,
   onClose,
@@ -18,6 +19,8 @@ export function CanvasSettingsCard({
   chapterPresetId,
   uiPresets,
   onApplyPreset,
+  autoHideToolbar,
+  onAutoHideToolbarChange,
 }: {
   open: boolean;
   onClose: () => void;
@@ -29,6 +32,8 @@ export function CanvasSettingsCard({
   chapterPresetId: string;
   uiPresets: UiPreset[];
   onApplyPreset: (id: string) => void;
+  autoHideToolbar: boolean;
+  onAutoHideToolbarChange: (value: boolean) => void;
 }) {
   const cardRef = useRef<HTMLDivElement | null>(null);
 
@@ -98,17 +103,17 @@ export function CanvasSettingsCard({
         value={chapterPresetId || 'none'}
         // Base-UI renders the raw value in the trigger unless Root knows
         // the items; passing the map makes the trigger show names
-        items={{ none: 'tldraw defaults', ...Object.fromEntries(uiPresets.map((p) => [p.id, p.name])) }}
+        items={{ none: "Oort's defaults", ...Object.fromEntries(uiPresets.map((p) => [p.id, p.name])) }}
         onValueChange={(v) => {
           if (v === null) return;
           onApplyPreset(v === 'none' ? '' : v);
         }}
       >
         <SelectTrigger className="w-full">
-          <SelectValue placeholder="tldraw defaults" />
+          <SelectValue placeholder="Oort's defaults" />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value="none">tldraw defaults</SelectItem>
+          <SelectItem value="none">Oort's defaults</SelectItem>
           {uiPresets.map((p) => (
             <SelectItem key={p.id} value={p.id}>
               {p.name}
@@ -120,6 +125,24 @@ export function CanvasSettingsCard({
         Applies this preset to the chapter immediately and keeps it for
         future sessions. Manage presets in Settings → Presets.
       </p>
+      <div className="mt-4 flex items-center justify-between gap-3 border-t border-line pt-4">
+        <div className="min-w-0">
+          <label
+            htmlFor="canvas-auto-hide-toolbar"
+            className="block text-[13px] font-medium text-muted-foreground"
+          >
+            Auto-hide toolbar
+          </label>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Fades the toolbar while you're not using it.
+          </p>
+        </div>
+        <Switch
+          id="canvas-auto-hide-toolbar"
+          checked={autoHideToolbar}
+          onCheckedChange={onAutoHideToolbarChange}
+        />
+      </div>
     </div>
   );
 }

@@ -1,6 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { getSnapshot, loadSnapshot, type Editor, type TLCamera, type TLPageId, type TLShape, type TLUnknownShape } from 'tldraw';
+import {
+  DefaultFontStyle,
+  getSnapshot,
+  loadSnapshot,
+  type Editor,
+  type TLCamera,
+  type TLPageId,
+  type TLShape,
+  type TLUnknownShape,
+} from 'tldraw';
 import { api, type Chapter, type Topic, type TopicPage } from '@/lib/ipc';
+import { defaultConfig } from '@/lib/preset-config';
+import { useUiPresetStore } from '@/stores/ui-preset-store';
 import { toast } from 'sonner';
 
 // tldraw page ids are 'page:<uuid>'; in both chapter modes the uuid is the
@@ -25,6 +36,15 @@ function pageIdToTopicId(pageId: string): string {
 
 function toErrorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+/** Put the canvas back on the preset's default font after a snapshot load.
+ *  Snapshot loading replaces instance state, including the stylesForNextShape
+ *  cache, so a toolbar effect that ran earlier would otherwise be wiped and
+ *  new text would silently fall back to tldraw's stock 'draw' face. */
+function applyDefaultFont(editor: Editor) {
+  const config = useUiPresetStore.getState().config ?? defaultConfig();
+  editor.setStyleForNextShapes(DefaultFontStyle, config.fonts.default);
 }
 
 /**
@@ -168,6 +188,15 @@ export function useChapterCanvas(
   // camera → pager sync teardown (page chapters): free wheel-scrolling must
   // keep the pager's active page following what's actually in view
   const cameraSyncTeardownRef = useRef<(() => void) | null>(null);
+  // addSheet()/aiAddPage() extend the stack after mount, while the containment
+  // side effects are registered by `registerStackSideEffects` further down.
+  // They reach it through this ref so a new sheet can refresh the handlers.
+  // The handlers themselves read the sheet count from `activePagesRef` at
+  // call time, so a stale registration can never clamp a shape into the
+  // previous sheet (the "typing lands on the page above" bug).
+  const registerStackSideEffectsRef = useRef<((editor: Editor) => void) | null>(
+    null,
+  );
 
   // page-mode state: the open topic's sheets (order = vertical position)
   const activePagesRef = useRef<TopicPage[]>([]);
@@ -321,7 +350,11 @@ export function useChapterCanvas(
             origin: { x: 0, y: 0 },
             initialZoom: 'fit-min-100',
             baseZoom: 'fit-min',
-            behavior: 'contain',
+            // x stays inside the page column. y uses 'outside' so the camera
+            // can scroll the last sheet's *top* to the viewport top; with
+            // 'contain' the stack bottom is welded to the viewport bottom, so
+            // adding a page left the previous sheet + gap visible above it.
+            behavior: { x: 'contain', y: 'outside' },
           },
         });
     },
@@ -382,8 +415,10 @@ export function useChapterCanvas(
   const refit = useCallback(() => {
     const editor = editorRef.current;
     if (!editor || !isPageChapter) return;
-    applyStackConstraints(editor, activePagesRef.current.length);
-    applyFit(editor, fitModeRef.current, activePageIndexRef.current);
+    editor.run(() => {
+      applyStackConstraints(editor, activePagesRef.current.length);
+      applyFit(editor, fitModeRef.current, activePageIndexRef.current);
+    }, { history: 'ignore' });
   }, [applyStackConstraints, applyFit, isPageChapter]);
 
   const activePageIndexRef = useRef(0);
@@ -414,8 +449,17 @@ export function useChapterCanvas(
         setActivePages(activePagesRef.current);
         const editor = editorRef.current;
         if (editor) {
-          applyStackConstraints(editor, activePagesRef.current.length);
-          goToSheet(activePagesRef.current.length - 1);
+          const count = activePagesRef.current.length;
+          // refresh the side-effect closures first; they read the stack from
+          // activePagesRef at call time, so they immediately see the new sheet
+          registerStackSideEffectsRef.current?.(editor);
+          // setCameraOptions() re-applies the constraints to the *old* camera
+          // synchronously. Fit the fresh sheet in the same transaction so the
+          // intermediate camera position is never painted (the add-page jump).
+          editor.run(() => {
+            applyStackConstraints(editor, count);
+            goToSheet(count - 1);
+          }, { history: 'ignore' });
         }
       } catch (e) {
         setError(toErrorMessage(e));
@@ -435,8 +479,12 @@ export function useChapterCanvas(
         setActivePages(activePagesRef.current);
         const editor = editorRef.current;
         if (editor) {
-          applyStackConstraints(editor, activePagesRef.current.length);
-          goToSheet(activePagesRef.current.length - 1);
+          const count = activePagesRef.current.length;
+          registerStackSideEffectsRef.current?.(editor);
+          editor.run(() => {
+            applyStackConstraints(editor, count);
+            goToSheet(count - 1);
+          }, { history: 'ignore' });
         }
         return { id: created.id, name: created.name, index: activePagesRef.current.length - 1 };
       }
@@ -465,23 +513,32 @@ export function useChapterCanvas(
   );
 
   /// Page-mode sheet containment: shapes live inside the sheet regions of
-  /// the stack — never in the gap between two sheets. Re-registered when the
-  /// stack changes.
+  /// the stack — never in the gap between two sheets. The sheet count and
+  /// stack height are read from `activePagesRef` at call time (not captured
+  /// when the handlers are registered): adding a sheet updates the ref, and
+  /// a clamp registered for the previous count would otherwise pull fresh
+  /// content into the sheet above.
   const registerStackSideEffects = useCallback(
-    (editor: Editor, stackH: number) => {
+    (editor: Editor) => {
       unregisterSideEffectsRef.current.forEach((fn) => fn());
       const pw = chapter.page_width!;
       const ph = chapter.page_height!;
       const maxW = () => pw - getInset() * 2;
 
-      // number of sheet regions the stack height was built from
-      const sheetCount = Math.max(1, Math.round((stackH + SHEET_GAP) / (ph + SHEET_GAP)));
+      // current stack geometry, read live for the same reason as above
+      const stackHNow = () => {
+        const count = activePagesRef.current.length;
+        return count > 0 ? count * (ph + SHEET_GAP) - SHEET_GAP : ph;
+      };
+      const sheetCountNow = () => Math.max(1, activePagesRef.current.length);
 
       /// Clamps a shape into the sheet region it overlaps most: x within the
       /// sheet's width, y within that sheet's band. Shapes land on a page —
       /// never in the dead space between two pages. Shapes taller than one
       /// sheet fall back to stack-wide clamping (they must span sheets).
       const clampIntoSheets = (x: number, y: number, w: number, h: number) => {
+        const stackH = stackHNow();
+        const sheetCount = sheetCountNow();
         const inset = getInset();
         const cx = w >= maxW() ? inset : Math.min(Math.max(x, inset), pw - inset - w);
         if (h >= ph - inset * 2) {
@@ -525,11 +582,11 @@ export function useChapterCanvas(
 
       // the sheet never touches the viewport edges: clamp the camera so at
       // least `padding` px of canvas stays visible around the stack. When the
-      // padded stack fits an axis entirely, that axis is forced to center
-      // (tldraw's 'contain' would otherwise pin it to the constraints
-      // origin); zoomed in past that, one axis must give (PDF-style panning)
-      // and the clamp keeps at least `padding` px of the sheet on screen.
-      const clampAxis = (cam: number, viewport: number, stack: number, z: number) => {
+      // padded stack fits the axis, it is forced to center (tldraw's
+      // 'contain' would otherwise pin it to the constraints origin);
+      // zoomed in past that, horizontal panning is clamped to keep at least
+      // `padding` px of the page column on screen.
+      const clampX = (cam: number, viewport: number, stack: number, z: number) => {
         const p = getPadding();
         if (stack * z + p * 2 <= viewport) return viewport / (2 * z) - stack / 2;
         const fittedLo = p / z;
@@ -537,11 +594,26 @@ export function useChapterCanvas(
         if (fittedLo <= fittedHi) return Math.min(Math.max(cam, fittedLo), fittedHi);
         return Math.min(Math.max(cam, p / z - stack), (viewport - p) / z);
       };
+      // Vertical range: from the first sheet top-aligned to the last sheet
+      // top-aligned. 'contain' would weld the stack bottom to the viewport
+      // bottom, so the last sheet could never reach the top (adding a page
+      // left the previous sheet + gap above it). A tall last sheet may also
+      // scroll further to its bottom; a short first sheet may center for
+      // page fit.
+      const clampY = (cam: number, viewport: number, z: number) => {
+        const p = getPadding();
+        const stack = stackHNow();
+        if (stack * z + p * 2 <= viewport) return viewport / (2 * z) - stack / 2;
+        const lastTop = (sheetCountNow() - 1) * (ph + SHEET_GAP);
+        const hi = p / z + Math.max(0, (viewport / z - ph) / 2);
+        const lo = Math.min(p / z - lastTop, (viewport - p) / z - stack);
+        return Math.min(Math.max(cam, lo), hi);
+      };
       const cameraMargin = (_prev: TLCamera, next: TLCamera) => {
         const { w: W, h: H } = editor.getViewportScreenBounds();
         const z = next.z || 1;
-        const x = clampAxis(next.x, W, pw, z);
-        const y = clampAxis(next.y, H, stackH, z);
+        const x = clampX(next.x, W, pw, z);
+        const y = clampY(next.y, H, z);
         if (x === next.x && y === next.y) return next;
         return { ...next, x, y };
       };
@@ -588,9 +660,19 @@ export function useChapterCanvas(
     [chapter.page_width, chapter.page_height, getPadding, getInset],
   );
 
+  // exposed to addSheet()/aiAddPage() above, which extend the stack after
+  // mount and must re-register the clamp for the new sheet count
+  registerStackSideEffectsRef.current = registerStackSideEffects;
+
   /// Load a topic's sheets into the stack view (page chapters).
   const openTopicStack = useCallback(
     async (editor: Editor, topic: Topic) => {
+      // A page chapter has one tldraw page per topic: switching the visible
+      // sheet stack must also switch the editor's current page, otherwise the
+      // canvas keeps rendering (and the store listener keeps reporting) the
+      // previous topic. Deep links enter through here too.
+      const topicPageId = topicIdToPageId(topic.id);
+      if (editor.getPage(topicPageId)) editor.setCurrentPage(topicPageId);
       let rows = await api.listTopicPages(topic.id);
       if (rows.length === 0) {
         rows = [await api.createTopicPage(topic.id, '1')];
@@ -600,11 +682,13 @@ export function useChapterCanvas(
       setActivePages(rows);
       activePageIndexRef.current = 0;
       setActivePageIndex(0);
-      applyStackConstraints(editor, rows.length);
-      registerStackSideEffects(editor, stackHeight(rows.length));
-      applyFit(editor, fitModeRef.current, 0);
+      registerStackSideEffects(editor);
+      editor.run(() => {
+        applyStackConstraints(editor, rows.length);
+        applyFit(editor, fitModeRef.current, 0);
+      }, { history: 'ignore' });
     },
-    [applyStackConstraints, registerStackSideEffects, stackHeight, applyFit],
+    [applyStackConstraints, registerStackSideEffects, applyFit],
   );
 
   const handleMount = useCallback(
@@ -627,6 +711,7 @@ export function useChapterCanvas(
             canvas.snapshot as unknown as Parameters<typeof loadSnapshot>[1],
           );
         }
+        applyDefaultFont(editor);
 
         topicsRef.current = dbTopics;
         setTopics(dbTopics);
@@ -647,18 +732,29 @@ export function useChapterCanvas(
           }
         }
 
-        // a fresh editor starts with one throwaway default page; drop it when
-        // the chapter already has real topics
-        if (!hasSnapshot && dbTopics.length > 0) {
+        // The topic rows are the source of truth for which pages exist. A
+        // page can still be present in the saved snapshot after its topic was
+        // deleted from the chapters list (that delete has no editor instance
+        // to update); leaving it here would make reconcileTopics recreate the
+        // topic from the stale page. Delete those pages through tldraw itself
+        // — deletePage also removes the page's shapes and page state. With
+        // zero stored topics we keep the editor's default page so a brand-new
+        // or empty chapter still has a canvas to adopt as Topic 1.
+        if (dbTopics.length > 0) {
+          const topicPageIds = new Set(dbTopics.map((t) => topicIdToPageId(t.id)));
+          let removedStalePage = false;
           for (const page of editor.getPages()) {
-            if (!dbTopics.some((t) => topicIdToPageId(t.id) === page.id)) {
-              try {
-                editor.deletePage(page.id);
-              } catch {
-                // tldraw refuses to delete the last remaining page
-              }
+            if (topicPageIds.has(page.id)) continue;
+            try {
+              editor.deletePage(page.id);
+              removedStalePage = true;
+            } catch {
+              // tldraw refuses to delete the last remaining page
             }
           }
+          // persist the cleanup so the stale page cannot come back through a
+          // later snapshot load; saveCanvas swallows/logs its own errors
+          if (removedStalePage) void saveCanvas(editor);
         }
 
         await reconcileTopics(editor);
@@ -757,7 +853,7 @@ export function useChapterCanvas(
         editor.store.listen(scheduleSweep);
       }
     },
-    [chapter, isPageChapter, reconcileTopics, openTopicStack, scheduleSync],
+    [chapter, isPageChapter, reconcileTopics, openTopicStack, scheduleSync, saveCanvas],
   );
   // flush a pending debounced save when leaving the chapter
   useEffect(

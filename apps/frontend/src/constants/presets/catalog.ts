@@ -72,6 +72,14 @@ export const FONT_LABELS: Record<PresetFont, string> = {
   mono: 'Mono (code)',
 };
 
+/** The preset's default font is presented as Oort's default, whichever face
+ *  the preset selects. The other choices keep their descriptive names. */
+export const OORT_DEFAULT_FONT_LABEL = "Oort's default";
+
+export function fontLabel(font: PresetFont, defaultFont: PresetFont): string {
+  return font === defaultFont ? OORT_DEFAULT_FONT_LABEL : FONT_LABELS[font];
+}
+
 /** tldraw's text base font is 24px at scale 1; sizes are px meanings for
  * S/M/L, mapped onto the text shape's scale prop. */
 export const TEXT_BASE_PX = 24;

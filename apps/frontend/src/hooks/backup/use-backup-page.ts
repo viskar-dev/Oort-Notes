@@ -72,6 +72,22 @@ export function useBackupPage() {
     void load();
   }, [load]);
 
+  // The desktop OAuth flow finishes in the system browser: when the user
+  // comes back to the app, re-read the account state so the card reflects the
+  // connection even if the IPC promise was lost (window reload, closed tab).
+  useEffect(() => {
+    const refresh = () => void load();
+    const onVisibility = () => {
+      if (!document.hidden) void load();
+    };
+    window.addEventListener('focus', refresh);
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      window.removeEventListener('focus', refresh);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
+  }, [load]);
+
   const connected = status?.connected ?? false;
   const workspaceEmpty = backupState?.workspace_empty ?? false;
 
@@ -109,16 +125,59 @@ export function useBackupPage() {
 
   const handleConnect = async () => {
     setBusy('connect');
+    let finished = false;
+    let poll: ReturnType<typeof setInterval> | undefined;
+    let pollTimeout: ReturnType<typeof setTimeout> | undefined;
+    const stopWaiting = () => {
+      if (poll) clearInterval(poll);
+      if (pollTimeout) clearTimeout(pollTimeout);
+      poll = undefined;
+      pollTimeout = undefined;
+    };
+
+    // Desktop: the loopback command resolves after the token is stored, but
+    // the browser tab can be dismissed earlier (and the first backup used to
+    // run inside the command, delaying the promise). Poll the account state
+    // so the card flips to Connected the moment the backend actually has it,
+    // even if that single promise is delayed or never delivered.
+    poll = setInterval(() => {
+      if (finished) return;
+      void api
+        .googleStatus()
+        .then((s) => {
+          if (finished || !s.connected) return;
+          finished = true;
+          stopWaiting();
+          setStatus(s);
+          setBusy(null);
+          toast.success(`Connected to ${s.email ?? 'Google Drive'}.`);
+          void load();
+        })
+        .catch(() => {});
+    }, 1500);
+    // a denied/dismissed browser flow must not poll forever
+    pollTimeout = setTimeout(stopWaiting, 5 * 60_000);
+
     try {
       const result = await api.googleConnect();
       // desktop resolves here; web navigates away and never returns
+      if (finished) return;
+      finished = true;
+      stopWaiting();
       if (result.connected) {
         toast.success(`Connected to ${result.email ?? 'Google Drive'}.`);
       }
       await load();
     } catch (e) {
+      // a poll may have already seen the stored account (e.g. only the
+      // background backup failed) — then the connection is genuinely live
+      if (finished) return;
+      finished = true;
+      stopWaiting();
       toast.error('Google Drive connection failed', { description: errorText(e) });
     } finally {
+      finished = true;
+      stopWaiting();
       setBusy(null);
     }
   };
